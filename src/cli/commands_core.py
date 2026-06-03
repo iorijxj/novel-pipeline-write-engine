@@ -1508,15 +1508,17 @@ def cmd_stability_check(args=None):
         p0_issues.append(f"Agent 仅 {agent_count} 个，目标 >=15")
         score -= 10
 
-    # 7. pytest (--full only, v0.6.5-clean5: 防挂 + 禁用插件)
+    # 7. pytest (--full only)
     if full_mode:
+        print("  [运行] pytest...", flush=True)
         try:
             import os as _os
             env = {**_os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
             result = _sp.run(
                 [sys.executable, "-m", "pytest", "tests/", "-q", "--tb=short"],
                 cwd=str(PROJECT_ROOT), timeout=180,
-                capture_output=True, text=True, env=env
+                capture_output=True, text=True, env=env,
+                stdin=_sp.DEVNULL
             )
             test_ok = result.returncode == 0
             checks.append(("pytest", test_ok, f"exit={result.returncode}"))
@@ -1594,8 +1596,9 @@ def cmd_stability_check(args=None):
         p1_issues.append(f"无法检查 slot FTS: {e}")
         score -= 5
 
-    # 11. v0.6.5-clean10: --full 轻量结构自检（不跑 demo 子进程，防挂）
+    # 11. --full 结构自检
     if full_mode:
+        print("  [运行] 结构自检...", flush=True)
         try:
             smoke_ok = True
             smoke_parts = []
@@ -1646,13 +1649,15 @@ def cmd_stability_check(args=None):
     else:
         checks.append(("结构自检", True, "跳过（使用 --full 运行）"))
 
-    # 12. v0.6.5-clean11: demo 全流程运行测试 (--full only)
+    # 12. demo 全流程 (--full only)
     if full_mode:
+        print("  [运行] demo 全流程...", flush=True)
         try:
             demo = _sp.run(
                 [sys.executable, str(PROJECT_ROOT / "novel.py"), "demo"],
                 cwd=str(PROJECT_ROOT), timeout=120,
-                capture_output=True, text=True
+                capture_output=True, text=True,
+                stdin=_sp.DEVNULL
             )
             demo_ok = demo.returncode == 0
             # Also check stderr for import errors
@@ -1706,5 +1711,6 @@ def cmd_stability_check(args=None):
     else:
         print(f"\n  建议: 不建议发布")
     print("=" * 60)
+    sys.stdout.flush()
     return 0 if not p0_issues and score >= 80 else 1
 

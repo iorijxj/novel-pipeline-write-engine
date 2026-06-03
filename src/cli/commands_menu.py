@@ -104,7 +104,28 @@ def cmd_scc_help():
     print("  python novel.py learn remove <编号> 删除写作规则")
     print()
 
-    # ── 7. 导出与报告 ──
+    # ── 7. 角色管理 ──
+    print("  " + "─" * 60)
+    print("  【角色管理】voice / character")
+    print("  " + "─" * 60)
+    print("  python novel.py voice list                 列出当前角色声纹卡")
+    print("  python novel.py voice show <角色名>         查看声纹卡详情")
+    print("  python novel.py voice create <角色名>       创建声纹卡")
+    print("  python novel.py voice delete <角色名>       删除声纹卡")
+    print("  python novel.py voice check <章节号>        检查章节声纹一致性")
+    print("  python novel.py voice outline-check        从大纲检测声纹（可选 --create）")
+    print("  python novel.py voice set list             列出声纹卡组")
+    print("  python novel.py voice set use <卡组名>      切换声纹卡组")
+    print("  python novel.py character list             列出所有角色卡")
+    print("  python novel.py character show <角色名>     查看完整角色卡（声纹+性格+做事）")
+    print("  python novel.py character create <角色名>   创建默认角色卡")
+    print("  python novel.py character delete <角色名>   删除角色卡")
+    print("  python novel.py character edit <角色名> <字段> <值>  编辑角色字段")
+    print("  python novel.py character outline-check    从大纲检测所有角色状态")
+    print("  python novel.py character outline-check --create  检测 + 自动创建")
+    print()
+
+    # ── 8. 导出与报告 ──
     print("  " + "─" * 60)
     print("  【导出与报告】report / export")
     print("  " + "─" * 60)
@@ -761,6 +782,120 @@ def cmd_setup():
     return 0
 
 
+def _menu_character():
+    """角色管理子菜单."""
+    while True:
+        print()
+        print("  " + "─" * 50)
+        print("  【角色管理】")
+        print("  " + "─" * 50)
+        print("  [1] character list          列出所有角色卡")
+        print("  [2] character show <角色名>  查看完整角色卡")
+        print("  [3] character create <角色名> 创建默认角色卡")
+        print("  [4] character edit <字段> <值> 编辑当前角色字段")
+        print("  [5] character delete <角色名> 删除角色卡")
+        print("  [6] character outline-check  从大纲扫描角色缺什么")
+        print("  [7] character outline-check --create  扫描 + 自动补齐")
+        print("  [8] voice set list          列出声纹卡组")
+        print("  [9] voice set use <卡组名>   切换声纹卡组")
+        print("  [0] 返回主菜单")
+        print()
+        sub = input("  请选择 [0-9]: ").strip()
+        print()
+
+        if sub == "1":
+            _run_cmd("character list")
+        elif sub == "2":
+            name = input("  角色名: ").strip()
+            if name:
+                _run_cmd(f"character show {name}")
+        elif sub == "3":
+            name = input("  角色名: ").strip()
+            if name:
+                _run_cmd(f"character create {name}")
+        elif sub == "4":
+            name = input("  角色名: ").strip()
+            field = input("  字段 (如 core / habits / identity): ").strip()
+            value = input("  值: ").strip()
+            if name and field and value:
+                _run_cmd(f"character edit {name} {field} {value}")
+        elif sub == "5":
+            name = input("  角色名: ").strip()
+            if name:
+                _run_cmd(f"character delete {name}")
+        elif sub == "6":
+            _run_cmd("character outline-check")
+        elif sub == "7":
+            _run_cmd("character outline-check --create")
+        elif sub == "8":
+            _run_cmd("voice set list")
+        elif sub == "9":
+            sname = input("  卡组名: ").strip()
+            if sname:
+                _run_cmd(f"voice set use {sname}")
+        elif sub == "0":
+            break
+        else:
+            print("  无效选择，请重试。")
+
+
+def _menu_quality_check():
+    """质量检测子菜单."""
+    while True:
+        print()
+        print("  " + "─" * 50)
+        print("  【质量检测】")
+        print("  " + "─" * 50)
+        print("  [1] texture check <章>    完整质量检测（含 voice/texture 守卫）")
+        print("  [2] voice check <章>      声纹一致性检测")
+        print("  [3] check <文件>          对指定文件运行守卫检查")
+        print("  [4] guards                列出所有注册守卫及状态")
+        print("  [5] report                显示最近守卫报告")
+        print("  [6] genre list            列出可用题材包")
+        print("  [7] rag status            查看 RAG 状态")
+        print("  [0] 返回主菜单")
+        print()
+        sub = input("  请选择 [0-7]: ").strip()
+        print()
+
+        if sub == "1":
+            ch = input("  章节号: ").strip()
+            if ch:
+                _run_cmd(f"texture check {ch}")
+        elif sub == "2":
+            ch = input("  章节号: ").strip()
+            if ch:
+                _run_cmd(f"voice check {ch}")
+        elif sub == "3":
+            fp = input("  文件路径: ").strip()
+            if fp:
+                _run_cmd(f"check {fp}")
+        elif sub == "4":
+            _run_cmd("guards")
+        elif sub == "5":
+            _run_cmd("report")
+        elif sub == "6":
+            _run_cmd("genre list")
+        elif sub == "7":
+            _run_cmd("rag status")
+        elif sub == "0":
+            break
+        else:
+            print("  无效选择，请重试。")
+
+
+def _run_cmd(cmd: str):
+    """在 novel.py 上下文中运行命令。"""
+    import subprocess as _sp
+    import sys as _sys
+    r = _sp.run(
+        [_sys.executable, str(PROJECT_ROOT / "novel.py")] + cmd.split(),
+        cwd=str(PROJECT_ROOT), timeout=60,
+    )
+    if r.returncode != 0:
+        print(f"  ⚠️  命令返回非零: {r.returncode}")
+
+
 def cmd_menu():
     """交互式文本菜单 — 用 input() 实现的纯终端菜单。"""
     while True:
@@ -773,14 +908,14 @@ def cmd_menu():
         print("  [3] 大纲管理      添加/列出/切换/对比/回滚")
         print("  [4] 写作流程      pre → 写作 → post → review")
         print("  [5] Agent 陪审团   AI 审查（light / full 模式）")
-        print("  [6] Story Contract 故事合同系统")
-        print("  [7] 报告与导出    守卫报告、导出小说")
-        print("  [8] 操作手册      打印完整中文手册")
-        print("  [9] 高级命令      genre/style/RAG/learn/query")
+        print("  [6] 角色管理      角色卡 查看/创建/编辑/大纲扫描")
+        print("  [7] 质量检测      texture / voice / 守卫检查")
+        print("  [8] Story Contract 故事合同系统")
+        print("  [9] 报告与导出    守卫报告、导出小说")
+        print("  [C] 章节列表      列出所有章节")
         print("  [S] 项目设置      设置小说文件夹路径")
         print("  [0] 退出")
-        print()
-        choice = input("  请选择 [0-9/S]: ").strip()
+        choice = input("  请选择 [0-9/C/S]: ").strip()
 
         if choice == "1":
             # 新手检查
@@ -825,23 +960,22 @@ def cmd_menu():
             _menu_agents()
 
         elif choice == "6":
-            _menu_story_contract()
+            _menu_character()
 
         elif choice == "7":
-            _menu_reports_exports()
+            _menu_quality_check()
 
         elif choice == "8":
-            print()
-            cmd_scc_help()
+            _menu_story_contract()
 
         elif choice == "9":
-            _menu_advanced()
-
-        elif choice.upper() == "S":
-            cmd_setup()
+            _menu_reports_exports()
 
         elif choice.upper() == "C":
             cmd_chapters()
+
+        elif choice.upper() == "S":
+            cmd_setup()
 
         elif choice == "0":
             print()

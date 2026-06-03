@@ -1,3 +1,22 @@
+## v0.6.7 - 综合管理模块 (2026-06-03)
+
+### Added
+- **角色综合管理模块** — character 命令，14个子命令统一管理角色
+  - 声纹 + 性格 + 做事风格 + 身份 + 关系 + 成长弧 + 元数据
+  - character relate/unrelate/relation-graph 关系管理
+  - character export/import 跨项目搬卡
+  - character focus 聚焦状态（活跃/暂离/退场）
+  - character arc-check 弧线进度检查
+  - character chapters 出场章节查询
+  - character sync-story 同步到故事合同系统
+  - character outline-check --create 大纲→角色一键补齐
+- **旧声纹系统标记废弃** — voice_profile_loader.py 加 DEPRECATED
+
+### Fixed
+- README / scc_menu.json / pyproject.toml / CHANGELOG 版本统一为 v0.6.7
+- 打包脚本修复 demo/novels 误排除
+- 删除根目录遗留导出文件
+
 # Changelog
 
 ## v0.6.5-fixed.3 - 剧情进度控制器 v2: 复合题材 + 弹性加权 (2026-06-03)

@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """
-voice_profile_loader.py — 统一加载角色声纹上下文
+voice_profile_loader.py — [DEPRECATED] 统一加载角色声纹上下文
 
-优先级:
-  1. SQLite character_voice_profiles (如果 use_database_profiles=true)
-  2. novels/{novel_slug}/voice_profiles.json
-  3. examples/demo_novel/voice_profiles.example.json
-  4. 空 profiles + warning
+此模块已被角色综合管理模块（character）取代。
+请使用: python novel.py character show/list/edit
 
-返回 voice_context dict，可直接传给 character_voice_guard。
+保留此文件仅用于避免旧导入报错，未来版本将移除。
 """
 
 import sqlite3, json

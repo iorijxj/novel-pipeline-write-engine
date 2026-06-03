@@ -35,6 +35,7 @@ from src.cli.commands_menu import (
 from src.cli.commands_db import cmd_db
 from src.cli.commands_outline import cmd_outline
 from src.cli.commands_voice import cmd_voice
+from src.cli.commands_character import cmd_character
 from src.cli.commands_texture import cmd_texture
 
 
@@ -233,6 +234,61 @@ def main():
     p_voice_set_sub.add_parser("list", help="列出声纹卡组")
     p_voice_set_use = p_voice_set_sub.add_parser("use", help="切换声纹卡组")
     p_voice_set_use.add_argument("set_name", help="卡组名")
+    p_voice_outline_check = p_voice_sub.add_parser("outline-check", help="从大纲检查所有角色声纹状态")
+    p_voice_outline_check.add_argument("--create", action="store_true", dest="create_missing",
+                                       help="同时为缺失声纹卡的角色创建默认声纹卡")
+    # character 角色综合管理
+    p_char = sub.add_parser("character", help="角色综合管理（声纹+性格+做事风格）")
+    p_char_sub = p_char.add_subparsers(dest="character_action")
+    p_char_sub.add_parser("list", help="列出所有角色卡")
+    p_char_show = p_char_sub.add_parser("show", help="查看完整角色卡")
+    p_char_show.add_argument("character_name", help="角色名")
+    p_char_create = p_char_sub.add_parser("create", help="创建默认角色卡")
+    p_char_create.add_argument("character_name", help="角色名")
+    p_char_delete = p_char_sub.add_parser("delete", help="删除角色卡")
+    p_char_delete.add_argument("character_name", help="角色名")
+    p_char_edit = p_char_sub.add_parser("edit", help="编辑角色字段")
+    p_char_edit.add_argument("character_name", help="角色名")
+    p_char_edit.add_argument("field", help="字段名（如 core / habits / dialect）")
+    p_char_edit.add_argument("value", help="字段值")
+    p_char_oc = p_char_sub.add_parser("outline-check", help="从大纲检查所有角色卡状态")
+    p_char_oc.add_argument("--create", action="store_true", dest="create_missing",
+                           help="同时为缺失角色卡的角色创建默认卡")
+    # character: relate
+    p_relate = p_char_sub.add_parser("relate", help="设置角色关系")
+    p_relate.add_argument("char_a", help="角色A")
+    p_relate.add_argument("char_b", help="角色B")
+    p_relate.add_argument("relation_type", help="关系类型（如 知己/对立/师徒）")
+    # character: unrelate
+    p_unrelate = p_char_sub.add_parser("unrelate", help="删除角色关系")
+    p_unrelate.add_argument("char_a", help="角色A")
+    p_unrelate.add_argument("char_b", help="角色B")
+    # character: relation-graph
+    p_char_sub.add_parser("relation-graph", help="文本角色关系图谱")
+    # character: export
+    p_export = p_char_sub.add_parser("export", help="导出角色卡")
+    p_export.add_argument("character_name", help="角色名")
+    p_export.add_argument("output_path", nargs="?", default="", help="输出文件路径")
+    # character: import
+    p_import = p_char_sub.add_parser("import", help="导入角色卡")
+    p_import.add_argument("input_path", help="JSON文件路径")
+    # character: focus
+    p_focus = p_char_sub.add_parser("focus", help="设置角色聚焦状态")
+    p_focus.add_argument("character_name", help="角色名")
+    p_focus.add_argument("focus_state", help="活跃/暂离/退场")
+    # character: arc-check
+    p_char_sub.add_parser("arc-check", help="弧线进度检查")
+    # character: sync-story
+    p_char_sub.add_parser("sync-story", help="同步角色卡到故事合同系统")
+    # character: chapters
+    p_char_chapters = p_char_sub.add_parser("chapters", help="查角色在哪些章节出场")
+    p_char_chapters.add_argument("character_name", help="角色名")
+    # character: check (综合风格检测)
+    p_char_check = p_char_sub.add_parser("check", help="综合角色风格检测（6项弹性检查）")
+    p_char_check.add_argument("chapter_no", help="章节号")
+    p_char_check.add_argument("--intensity", default="normal",
+                              choices=["light", "normal", "strict"],
+                              help="检测强度: light/normal/strict")
     # texture 人工味质量层
     p_tx = sub.add_parser("texture", help="人工味质量层检测")
     p_tx_sub = p_tx.add_subparsers(dest="texture_action")
@@ -318,6 +374,7 @@ def main():
         "menu-show": lambda: sys.exit(cmd_menu_show()),
         "menu-text": lambda: sys.exit(cmd_menu_text()),
         "voice": lambda: sys.exit(cmd_voice(args)),
+        "character": lambda: sys.exit(cmd_character(args)),
         "texture": lambda: sys.exit(cmd_texture(args)),
     }
 

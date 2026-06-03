@@ -2,14 +2,16 @@
 """src/cli/commands_voice.py — 声纹卡管理 v0.6.6
 
 命令:
-  python novel.py voice list             列出当前小说的声纹卡
-  python novel.py voice show <角色名>     查看声纹卡详情
-  python novel.py voice create <角色名>   创建声纹卡（交互式）
-  python novel.py voice delete <角色名>   删除声纹卡
-  python novel.py voice check <章节号>    检测本章角色声纹一致性
+  python novel.py voice list                 列出当前小说的声纹卡
+  python novel.py voice show <角色名>         查看声纹卡详情
+  python novel.py voice create <角色名>       创建声纹卡（交互式）
+  python novel.py voice delete <角色名>       删除声纹卡
+  python novel.py voice check <章节号>        检测本章角色声纹一致性
+  python novel.py voice outline-check        从大纲检查所有角色声纹（可选 --create）
 """
 import sys
 import json
+import re
 from pathlib import Path
 from src.cli.shared import PROJECT_ROOT, SCRIPTS_DIR
 from src.guards.human_texture.voice_diversity_guard import (
@@ -53,6 +55,219 @@ def _resolve_chapter_path(chapter_no: str) -> str | None:
     except Exception:
         pass
     return None
+
+
+def _get_db_characters() -> list[dict]:
+    """从当前 slot 的 characters 表获取所有已注册角色."""
+    try:
+        ws_dir = PROJECT_ROOT / "workspace"
+        reg_file = ws_dir / "registry.json"
+        if not reg_file.exists():
+            return []
+        reg = json.loads(reg_file.read_text(encoding="utf-8"))
+        active = reg.get("active_slot", "")
+        if not active:
+            return []
+        db_path = ws_dir / active / "novel.db"
+        if not db_path.exists():
+            return []
+        import sqlite3
+        conn = sqlite3.connect(str(db_path))
+        cur = conn.execute("SELECT name, alias, role, identity FROM characters WHERE status='active'")
+        rows = cur.fetchall()
+        conn.close()
+        result = []
+        for r in rows:
+            char = {"name": r[0]}
+            if r[1]:
+                char["alias"] = r[1]
+            if r[2]:
+                char["role"] = r[2]
+            if r[3]:
+                char["identity"] = r[3]
+            result.append(char)
+        return result
+    except Exception:
+        return []
+
+
+def _extract_chinese_names(text: str) -> set:
+    """从文本中提取中文人名。
+
+    优先级:
+    1. 从「角色:」「主角:」等字段后提取 → 最可靠
+    2. 姓氏启发式（仅 2-3 字名，过滤掉明显不是人名的）"""
+    surnames = set("李王张刘陈杨赵黄周吴徐孙马胡朱郭何林高罗"
+                   "郑梁谢宋唐许邓韩冯曹彭曾肖田董潘袁蔡蒋余"
+                   "于杜叶程苏魏吕丁任卢姚沈姜崔钟谭陆汪范金"
+                   "石廖贾夏韦傅方白邹孟熊秦邱江尹薛阎段雷侯"
+                   "龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤")
+
+    reliable_names = set()
+    heuristic_names = set()
+
+    # 方法1（优先）：角色字段后提取
+    for pattern in [r'(?:主角|姓名|角色|人物|男主|女主|男配|女配)[：:]\s*([^\n，。]{2,4})',
+                    r'(?:主角|姓名|角色|人物|男主|女主|男配|女配)[是为叫作叫做称呼]\s*([^\n，。]{2,4})']:
+        for m in re.finditer(pattern, text):
+            name = m.group(1).strip()
+            if 2 <= len(name) <= 4:
+                reliable_names.add(name)
+
+    # 方法2：姓氏启发式 — 仅提取 2 字名（3 字名依赖「角色:」字段和 DB）
+    _punct_chars = set("，。！？、；：''（）《》…— \t,./!?;:()[]{}")
+    for i, ch in enumerate(text):
+        if ch in surnames and i + 1 < len(text):
+            nxt = text[i + 1]
+            if nxt not in _punct_chars:
+                candidate2 = text[i:i + 2]
+                # 过滤词尾（不是人名的常见词）
+                _bad_endings = {"场", "上", "下", "里", "前", "后", "中", "的", "了",
+                                "和", "与", "在", "把", "被", "将", "对", "为",
+                                "都", "也", "还", "就", "已", "能", "会", "可",
+                                "来", "去", "出", "进", "到", "从", "以"}
+                if candidate2[1] not in _bad_endings:
+                    heuristic_names.add(candidate2)
+
+    # 合并：可靠名优先
+    result = set(reliable_names)
+    for hn in heuristic_names:
+        # 跳过可靠名的子串（避免 "韩烈" 和 "韩烈在" 等问题）
+        if any(hn in rn or rn in hn for rn in reliable_names):
+            continue
+        # 跳过高频非人名词
+        _stop = {"时候", "地方", "这里", "那里", "这边", "那边", "怎么", "什么",
+                 "没有", "已经", "可以", "需要", "知道", "看见", "告诉", "开始",
+                 "继续", "回到", "来到", "走出", "进入", "拿起", "放下"}
+        if hn in _stop:
+            continue
+        result.add(hn)
+
+    return {n for n in result if 2 <= len(n) <= 4}
+
+
+def _cmd_voice_outline_check(create_missing: bool = False):
+    """从大纲检查所有角色的声纹卡状态."""
+    # 1. 获取当前活跃大纲
+    mgr = __import__("scripts.outline.outline_manager", fromlist=["OutlineManager"])
+    OM = getattr(mgr, "OutlineManager")
+    om = OM(PROJECT_ROOT)
+    outline = om.current_outline()
+    if not outline:
+        print("  ⛔ 当前没有激活的大纲")
+        print("  先: python novel.py outline add <大纲文件>")
+        return
+
+    content = outline.get("content", "")
+    title = outline.get("title", "未命名大纲")
+    print(f"  📋 大纲: {title} ({outline.get('chapter_count', 0)} 章)")
+    print()
+
+    # 2. 提取角色名
+    extracted_names = _extract_chinese_names(content)
+
+    # 3. 从 DB characters 表获取注册角色
+    db_chars = _get_db_characters()
+    db_names = {c["name"] for c in db_chars}
+    # 别名也加入
+    for c in db_chars:
+        alias = c.get("alias", "")
+        if alias:
+            for a in alias.split(","):
+                a = a.strip()
+                if a:
+                    db_names.add(a)
+
+    # 合并所有角色名
+    all_chars = extracted_names | db_names
+
+    if not all_chars:
+        print("  ⚠️  大纲中未检测到角色名")
+        print("  💡 如果角色在 characters 表中已注册，会自动识别")
+        print("  💡 也可在 outline 中用「角色: 张三」格式显式标记")
+        return
+
+    # 4. 获取现有声纹卡
+    cards = list_voice_cards(PROJECT_ROOT)
+    card_names = {c.get("name", ""): c for c in cards}
+    card_set = set(card_names.keys())
+
+    # 5. 比对
+    has_card = sorted(all_chars & card_set)
+    missing = sorted(all_chars - card_set)
+
+    print(f"  🎭 检测到 {len(all_chars)} 个角色:")
+    print()
+
+    # 按来源分类
+    from_outline = extracted_names
+    from_db = db_names
+
+    for name in sorted(all_chars):
+        source = []
+        if name in from_outline:
+            source.append("大纲")
+        if name in from_db:
+            source.append("DB")
+        src_tag = f"[{'/'.join(source)}]"
+
+        if name in card_set:
+            card = card_names[name]
+            dialect = card.get("dialect", "") or "无"
+            pref = card.get("sentence_length_preference", "?")
+            print(f"    ✅ {name:8s} {src_tag:12s} 方言:{dialect:6s} 句长:{pref}")
+        else:
+            print(f"    ❌ {name:8s} {src_tag:12s} 无声纹卡")
+
+    print()
+
+    if missing:
+        print(f"  ⚠️  {len(missing)} 个角色尚未创建声纹卡:")
+        for name in missing:
+            print(f"     python novel.py voice create {name}")
+        print()
+
+        if create_missing:
+            created = 0
+            for name in missing:
+                new_card = {
+                    "sentence_length_preference": "中等",
+                    "common_words": [],
+                    "forbidden_words": [],
+                    "emotional_leak_style": "",
+                    "anger_style": "",
+                    "lie_style": "",
+                    "silence_style": "",
+                    "humor_style": "",
+                    "relationship_specific_tone": {},
+                }
+                ok = save_voice_card(PROJECT_ROOT, name, new_card)
+                if ok:
+                    created += 1
+            print(f"  ✅ 已自动创建 {created}/{len(missing)} 个角色的默认声纹卡")
+            # 重新计算覆盖率
+            cards = list_voice_cards(PROJECT_ROOT)
+            card_names = {c.get("name", ""): c for c in cards}
+            card_set = set(card_names.keys())
+            has_card = sorted(all_chars & card_set)
+            missing = sorted(all_chars - card_set)
+        else:
+            print(f"  💡 加 --create 自动创建默认声纹卡")
+    else:
+        print("  ✅ 所有角色均已配置声纹卡")
+
+    # 6. 检查 DB 中有但大纲中没有的角色（过时角色检测）
+    extra = db_names - extracted_names
+    if extra:
+        print()
+        print(f"  📌 DB 中有但大纲中未出现的角色（可能已过时）:")
+        for name in sorted(extra):
+            print(f"     {name}")
+
+    print()
+    current_set = get_active_voice_card_set(PROJECT_ROOT)
+    print(f"  📁 当前声纹卡组: {current_set}")
+    print(f"  📊 声纹卡覆盖率: {len(has_card)}/{len(all_chars)} ({round(len(has_card)/len(all_chars)*100) if all_chars else 0}%)")
 
 
 def cmd_voice(args):
@@ -175,10 +390,16 @@ def cmd_voice(args):
             print("  list              — 列出声纹卡组")
             print("  use <卡组名>       — 切换声纹卡组")
 
+    elif action == "outline-check":
+        create_flag = getattr(args, "create_missing", False)
+        _cmd_voice_outline_check(create_missing=create_flag)
+
     else:
-        print("用法: python novel.py voice {list|show|create|delete|check}")
+        print("用法: python novel.py voice {list|show|create|delete|check|outline-check}")
         print("  list                    — 列出声纹卡")
         print("  show <角色名>            — 查看声纹卡")
         print("  create <角色名>          — 创建声纹卡")
         print("  delete <角色名>          — 删除声纹卡")
         print("  check <章节号>           — 检测声纹一致性")
+        print("  outline-check           — 从大纲检查所有角色声纹")
+        print("  outline-check --create  — 检查 + 自动创建缺失声纹卡")

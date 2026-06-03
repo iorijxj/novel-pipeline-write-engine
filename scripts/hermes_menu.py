@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""hermes_menu.py — 普通用户菜单生成器 v0.6.5-clean8
+"""hermes_menu.py — 普通用户菜单生成器
 
 提供给 Hermes Agent 调用，输出纯文本菜单，不暴露终端命令。
 所有输出都是自然语言，适合直接展示给普通用户。
@@ -17,8 +17,10 @@ def get_project_status() -> dict:
     ws = PROJECT_ROOT / "workspace"
     reg_file = ws / "registry.json"
 
+    from version import get_version
+    v = get_version()
     status = {
-        "version": "v0.6.5",
+        "version": v,
         "ok": False,
         "has_workspace": False,
         "active_slot": "",
@@ -85,7 +87,7 @@ def render_main_menu(status: dict) -> str:
     """生成普通用户主菜单文本"""
     lines = []
     lines.append("═══════════════════════════════════")
-    lines.append(f"  小说写作引擎 v0.6.5")
+    lines.append(f"  小说写作引擎 {status.get('version', 'v0.6.7')}")
     lines.append("═══════════════════════════════════")
     lines.append("")
 
