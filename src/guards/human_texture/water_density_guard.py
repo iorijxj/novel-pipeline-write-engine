@@ -104,6 +104,23 @@ def run_water_density_check(content: str, chapter_no: int = 0,
     }
 
 
+
+# 题材中文名 ↔ YAML key 映射
+GENRE_ALIASES = {
+    "修仙": "xianxia", "玄幻": "xuanhuan", "武侠": "wuxia",
+    "都市": "urban", "都市异能": "urban_fantasy", "科幻": "sci_fi",
+    "末世": "post_apocalyptic", "悬疑": "suspense",
+    "推理": "mystery", "恐怖灵异": "horror", "历史": "history", "言情": "romance",
+    "爽文": "爽文",
+}
+
+
+def _resolve_genre(genre: str) -> str:
+    """Resolve Chinese genre names to YAML keys."""
+    parts = [g.strip() for g in genre.split("+") if g.strip()]
+    return "+".join(GENRE_ALIASES.get(p, p) for p in parts)
+
+
 def _get_density_threshold(genre: str, word_count: int) -> tuple:
     """按题材返回密度阈值 (warn, fail)。支持复合题材如 xianxia+爽文。"""
     try:
@@ -112,7 +129,7 @@ def _get_density_threshold(genre: str, word_count: int) -> tuple:
         fp = Path(__file__).resolve().parent.parent.parent.parent / "configs" / "human_texture" / "genre_presets.yaml"
         if fp.exists():
             presets = yaml.safe_load(fp.read_text(encoding="utf-8"))
-            genres = [g.strip() for g in genre.split("+") if g.strip()]
+            genres = [g.strip() for g in _resolve_genre(genre).split("+") if g.strip()]
             if not genres:
                 genres = ["default"]
             total_w = 0

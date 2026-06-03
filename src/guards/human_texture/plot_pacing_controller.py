@@ -40,6 +40,23 @@ PACE_LEVELS = {
 }
 
 
+
+# 题材中文名 ↔ YAML key 映射
+GENRE_ALIASES = {
+    "修仙": "xianxia", "玄幻": "xuanhuan", "武侠": "wuxia",
+    "都市": "urban", "都市异能": "urban_fantasy", "科幻": "sci_fi",
+    "末世": "post_apocalyptic", "悬疑": "suspense",
+    "推理": "mystery", "恐怖灵异": "horror", "历史": "history", "言情": "romance",
+    "爽文": "爽文",
+}
+
+
+def _resolve_genre(genre: str) -> str:
+    """Resolve Chinese genre names to YAML keys."""
+    parts = [g.strip() for g in genre.split("+") if g.strip()]
+    return "+".join(GENRE_ALIASES.get(p, p) for p in parts)
+
+
 def _load_genre_pacing(genre: str) -> dict:
     """从 genre_presets.yaml 加载某个题材的 pacing 规则，支持复合题材如 xianxia+爽文."""
     try:
@@ -50,7 +67,7 @@ def _load_genre_pacing(genre: str) -> dict:
         presets = yaml.safe_load(fp.read_text(encoding="utf-8"))
 
         # 解析复合题材：xianxia+爽文 → ["xianxia", "爽文"]
-        genres = [g.strip() for g in genre.split("+") if g.strip()]
+        genres = [g.strip() for g in _resolve_genre(genre).split("+") if g.strip()]
         if not genres:
             genres = ["default"]
 

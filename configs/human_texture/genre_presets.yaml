@@ -1,23 +1,11 @@
-# genre_texture_presets.yaml — 按题材调阈值 v0.6.6
-# 不同题材节奏不同，不能一刀切。
-# 复合题材: --genre "xianxia+爽文" 自动合并规则
-# 接入: texture check 时传入 --genre 参数
+# genre_texture_presets.yaml v0.6.6 — 12 题材全覆盖
+# 每题材含 quality 阈值 + pacing 规则
+# 复合题材: --genre "修仙+爽文" 自动加权合并
+# 弹性规则：数值越大要求越严，0-100 分制
 
-default:
-  water_density_min: 60
-  conflict_pressure_min: 60
-  life_texture_min: 60
-  voice_diversity_min: 60
-  cliche_sentence_max: 8
-  emotion_summary_max: 10
-  pacing:
-    min_deltas: 2
-    weighted_deltas:
-      event_delta: 1.0
-      conflict_delta: 1.0
-      hook_delta: 1.0
-    focus_deltas: [event_delta, conflict_delta, hook_delta, decision_delta]
-
+# ═══════════════════════════════════════════════
+# 1. 修仙 — 升级打怪、境界突破、修炼资源
+# ═══════════════════════════════════════════════
 xianxia:
   water_density_min: 65
   conflict_pressure_min: 70
@@ -38,82 +26,53 @@ xianxia:
       clue_delta: 0.4
     focus_deltas: [conflict_delta, power_delta, cost_delta, hook_delta]
 
-爽文:
-  water_density_min: 50
+# ═══════════════════════════════════════════════
+# 2. 玄幻 — 大世界观、种族纷争、史诗冒险
+# ═══════════════════════════════════════════════
+xuanhuan:
+  water_density_min: 60
   conflict_pressure_min: 65
-  life_texture_min: 40
-  cliche_sentence_max: 10
-  emotion_summary_max: 12
-  pacing:
-    min_deltas: 4
-    weighted_deltas:
-      power_delta: 2.0
-      event_delta: 1.6
-      conflict_delta: 1.4
-      hook_delta: 1.3
-      decision_delta: 1.0
-      cost_delta: 0.4
-      relationship_delta: 0.3
-      clue_delta: 0.2
-    focus_deltas: [power_delta, event_delta, conflict_delta, hook_delta]
-
-mystery:
-  water_density_min: 70
-  clue_shift_min: 70
-  conflict_pressure_min: 75
-  cliche_sentence_max: 5
-  emotion_summary_max: 6
-  pacing:
-    min_deltas: 3
-    weighted_deltas:
-      clue_delta: 2.0
-      event_delta: 1.3
-      cost_delta: 1.2
-      hook_delta: 1.0
-      conflict_delta: 0.8
-      decision_delta: 0.7
-      relationship_delta: 0.3
-      power_delta: 0.2
-    focus_deltas: [clue_delta, event_delta, cost_delta, hook_delta]
-
-suspense:
-  water_density_min: 70
-  conflict_pressure_min: 75
-  cliche_sentence_max: 5
-  emotion_summary_max: 6
-  pacing:
-    min_deltas: 3
-    weighted_deltas:
-      clue_delta: 1.6
-      event_delta: 1.5
-      conflict_delta: 1.4
-      hook_delta: 1.3
-      decision_delta: 0.8
-      cost_delta: 0.7
-      relationship_delta: 0.4
-      power_delta: 0.3
-    focus_deltas: [clue_delta, event_delta, conflict_delta, hook_delta]
-
-romance:
-  water_density_min: 55
-  relationship_shift_min: 70
-  conflict_pressure_min: 55
-  life_texture_min: 70
+  life_texture_min: 50
   cliche_sentence_max: 8
-  emotion_summary_max: 10
+  emotion_summary_max: 9
   pacing:
-    min_deltas: 2
+    min_deltas: 3
     weighted_deltas:
-      relationship_delta: 2.0
-      decision_delta: 1.5
+      event_delta: 1.8
+      conflict_delta: 1.6
+      power_delta: 1.4
       hook_delta: 1.2
-      event_delta: 1.0
-      conflict_delta: 0.7
-      cost_delta: 0.5
-      power_delta: 0.2
-      clue_delta: 0.2
-    focus_deltas: [relationship_delta, decision_delta, hook_delta]
+      cost_delta: 1.0
+      decision_delta: 0.9
+      relationship_delta: 0.7
+      clue_delta: 0.5
+    focus_deltas: [event_delta, conflict_delta, power_delta, hook_delta]
 
+# ═══════════════════════════════════════════════
+# 3. 武侠 — 江湖恩怨、武学传承、侠义精神
+# ═══════════════════════════════════════════════
+wuxia:
+  water_density_min: 55
+  conflict_pressure_min: 75
+  life_texture_min: 65
+  cliche_sentence_max: 6
+  emotion_summary_max: 7
+  pacing:
+    min_deltas: 3
+    weighted_deltas:
+      conflict_delta: 2.0
+      decision_delta: 1.5
+      cost_delta: 1.4
+      relationship_delta: 1.2
+      event_delta: 1.1
+      hook_delta: 1.0
+      power_delta: 0.7
+      clue_delta: 0.5
+    focus_deltas: [conflict_delta, decision_delta, cost_delta, relationship_delta]
+
+# ═══════════════════════════════════════════════
+# 4. 都市 — 生活流、职场、日常人情
+# ═══════════════════════════════════════════════
 urban:
   water_density_min: 60
   life_texture_min: 70
@@ -134,6 +93,118 @@ urban:
       clue_delta: 0.3
     focus_deltas: [relationship_delta, event_delta, decision_delta, hook_delta]
 
+# ═══════════════════════════════════════════════
+# 5. 都市异能 — 都市背景+超能力，双重要求
+# ═══════════════════════════════════════════════
+urban_fantasy:
+  water_density_min: 55
+  life_texture_min: 60
+  conflict_pressure_min: 65
+  cliche_sentence_max: 8
+  emotion_summary_max: 9
+  pacing:
+    min_deltas: 3
+    weighted_deltas:
+      power_delta: 1.6
+      event_delta: 1.5
+      conflict_delta: 1.4
+      relationship_delta: 1.1
+      hook_delta: 1.0
+      decision_delta: 0.9
+      cost_delta: 0.7
+      clue_delta: 0.4
+    focus_deltas: [power_delta, event_delta, conflict_delta, relationship_delta]
+
+# ═══════════════════════════════════════════════
+# 6. 科幻 — 硬科幻/软科幻、科技设定、未来社会
+# ═══════════════════════════════════════════════
+sci_fi:
+  water_density_min: 65
+  conflict_pressure_min: 65
+  life_texture_min: 50
+  cliche_sentence_max: 7
+  emotion_summary_max: 8
+  pacing:
+    min_deltas: 3
+    weighted_deltas:
+      event_delta: 1.6
+      clue_delta: 1.5
+      cost_delta: 1.3
+      conflict_delta: 1.2
+      decision_delta: 1.1
+      hook_delta: 1.0
+      power_delta: 0.7
+      relationship_delta: 0.5
+    focus_deltas: [event_delta, clue_delta, cost_delta, conflict_delta]
+
+# ═══════════════════════════════════════════════
+# 7. 末世 — 生存、资源、灾难、人性挣扎
+# ═══════════════════════════════════════════════
+post_apocalyptic:
+  water_density_min: 60
+  conflict_pressure_min: 75
+  life_texture_min: 55
+  cliche_sentence_max: 7
+  emotion_summary_max: 8
+  pacing:
+    min_deltas: 3
+    weighted_deltas:
+      conflict_delta: 1.8
+      cost_delta: 1.7
+      event_delta: 1.5
+      decision_delta: 1.3
+      hook_delta: 1.2
+      power_delta: 1.0
+      relationship_delta: 0.6
+      clue_delta: 0.5
+    focus_deltas: [conflict_delta, cost_delta, event_delta, decision_delta]
+
+# ═══════════════════════════════════════════════
+# 8. 悬疑 — 紧张、未知、压迫感持续
+# ═══════════════════════════════════════════════
+suspense:
+  water_density_min: 70
+  conflict_pressure_min: 75
+  cliche_sentence_max: 5
+  emotion_summary_max: 6
+  pacing:
+    min_deltas: 3
+    weighted_deltas:
+      clue_delta: 1.6
+      event_delta: 1.5
+      conflict_delta: 1.4
+      hook_delta: 1.3
+      decision_delta: 0.8
+      cost_delta: 0.7
+      relationship_delta: 0.4
+      power_delta: 0.3
+    focus_deltas: [clue_delta, event_delta, conflict_delta, hook_delta]
+
+# ═══════════════════════════════════════════════
+# 9. 推理 — 逻辑推演、线索收集、真相揭晓
+# ═══════════════════════════════════════════════
+mystery:
+  water_density_min: 70
+  clue_shift_min: 70
+  conflict_pressure_min: 75
+  cliche_sentence_max: 5
+  emotion_summary_max: 6
+  pacing:
+    min_deltas: 3
+    weighted_deltas:
+      clue_delta: 2.0
+      event_delta: 1.3
+      cost_delta: 1.2
+      hook_delta: 1.0
+      conflict_delta: 0.8
+      decision_delta: 0.7
+      relationship_delta: 0.3
+      power_delta: 0.2
+    focus_deltas: [clue_delta, event_delta, cost_delta, hook_delta]
+
+# ═══════════════════════════════════════════════
+# 10. 恐怖灵异 — 氛围、惊吓、心理压迫
+# ═══════════════════════════════════════════════
 horror:
   water_density_min: 65
   atmosphere_progress_min: 70
@@ -151,8 +222,11 @@ horror:
       decision_delta: 0.6
       relationship_delta: 0.4
       power_delta: 0.3
-    focus_deltas: [conflict_delta, cost_delta, hook_delta, event_delta]
+    focus_deltas: [event_delta, conflict_delta, cost_delta, hook_delta]
 
+# ═══════════════════════════════════════════════
+# 11. 历史 — 史实、权谋、时代变迁
+# ═══════════════════════════════════════════════
 history:
   water_density_min: 60
   concrete_anchor_min: 75
@@ -171,3 +245,71 @@ history:
       power_delta: 0.5
       clue_delta: 0.4
     focus_deltas: [event_delta, cost_delta, decision_delta, hook_delta]
+
+# ═══════════════════════════════════════════════
+# 12. 言情 — 情感关系、人物互动、情绪推进
+# ═══════════════════════════════════════════════
+romance:
+  water_density_min: 55
+  relationship_shift_min: 70
+  conflict_pressure_min: 55
+  life_texture_min: 70
+  cliche_sentence_max: 8
+  emotion_summary_max: 10
+  pacing:
+    min_deltas: 2
+    weighted_deltas:
+      relationship_delta: 2.0
+      decision_delta: 1.5
+      hook_delta: 1.2
+      event_delta: 1.0
+      conflict_delta: 0.7
+      cost_delta: 0.5
+      power_delta: 0.2
+      clue_delta: 0.2
+    focus_deltas: [relationship_delta, decision_delta, hook_delta]
+
+# ═══════════════════════════════════════════════
+# ═══════════════════════════════════════════════
+# 爽文 — 快速升级、打脸、持续爽点
+# ═══════════════════════════════════════════════
+爽文:
+  water_density_min: 50
+  conflict_pressure_min: 65
+  life_texture_min: 40
+  cliche_sentence_max: 10
+  emotion_summary_max: 12
+  pacing:
+    min_deltas: 4
+    weighted_deltas:
+      power_delta: 2.0
+      event_delta: 1.6
+      conflict_delta: 1.4
+      hook_delta: 1.3
+      decision_delta: 1.0
+      cost_delta: 0.4
+      relationship_delta: 0.3
+      clue_delta: 0.2
+    focus_deltas: [power_delta, event_delta, conflict_delta, hook_delta]
+
+# 默认兜底
+# ═══════════════════════════════════════════════
+default:
+  water_density_min: 60
+  conflict_pressure_min: 60
+  life_texture_min: 60
+  voice_diversity_min: 60
+  cliche_sentence_max: 8
+  emotion_summary_max: 10
+  pacing:
+    min_deltas: 2
+    weighted_deltas:
+      event_delta: 1.0
+      conflict_delta: 1.0
+      hook_delta: 1.0
+      decision_delta: 1.0
+      relationship_delta: 1.0
+      cost_delta: 1.0
+      power_delta: 1.0
+      clue_delta: 1.0
+    focus_deltas: [event_delta, conflict_delta, hook_delta, decision_delta]

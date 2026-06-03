@@ -13,6 +13,25 @@ from .water_density_guard import run_water_density_check
 from .plot_pacing_controller import run_plot_pacing_check
 
 
+# 题材中文名 ↔ YAML key 映射
+GENRE_ALIASES = {
+    "修仙": "xianxia", "玄幻": "xuanhuan", "武侠": "wuxia",
+    "都市": "urban", "都市异能": "urban_fantasy", "科幻": "sci_fi",
+    "末世": "post_apocalyptic", "悬疑": "suspense",
+    "推理": "mystery", "恐怖灵异": "horror", "历史": "history", "言情": "romance",
+    "爽文": "爽文",
+}
+
+
+def _resolve_genre_key(genre: str) -> str:
+    """将中文题材名转为 YAML key，支持复合如 '修仙+爽文' -> 'xianxia+爽文'."""
+    parts = [g.strip() for g in genre.split("+") if g.strip()]
+    resolved = []
+    for p in parts:
+        resolved.append(GENRE_ALIASES.get(p, p))
+    return "+".join(resolved)
+
+
 def _load_genre_preset(genre: str = "default") -> dict:
     """Load genre texture thresholds from YAML, support composite genres like 'xianxia+爽文'."""
     try:
@@ -24,7 +43,7 @@ def _load_genre_preset(genre: str = "default") -> dict:
         presets = yaml.safe_load(fp.read_text(encoding="utf-8"))
 
         # Parse composite genres: "xianxia+爽文" -> ["xianxia", "爽文"]
-        genres = [g.strip() for g in genre.split("+") if g.strip()]
+        genres = [g.strip() for g in _resolve_genre_key(genre).split("+") if g.strip()]
         if not genres:
             genres = ["default"]
 
