@@ -10,7 +10,7 @@
 
 ---
 
-## v0.6.6 核心能力
+## v0.6.7 核心能力
 
 | # | 能力 | 说明 |
 |---|------|------|
@@ -23,6 +23,9 @@
 | 7 | **发布稳定性检查** | `stability-check --full` 一键验收，覆盖版本号、pytest、demo 全流程、cross-platform |
 | 8 | **人工味质量层 (Human Texture)** | 8 个质量 guard 自动运行：水文检测、剧情进度控制、陈词滥句、冲突压力、情绪总结、生活质感、节奏、声音多样性 |
 | 9 | **题材阈值预设** | 9 种题材独立阈值，`--genre xianxia --pace slow` 参数调优 |
+| 10 | **角色综合管理** | 角色声纹卡 / 性格配置 / 做事风格，`python novel.py voice|character|texture` |
+| 11 | **Genre/Style Pack 预设** | 13 种 genre + 8 种 style 写作预设，`novel.py genre|style` 查看 |
+| 12 | **sys.path.insert 清零** | 60+ 处 path 注入全部清除，改为 pip install -e . 正规包导入 |
 
 ---
 
@@ -170,12 +173,18 @@ novel.py                         ← CLI 入口
 src/
 ├── cli/                         ← 命令实现
 │   ├── shared.py                ← 共用 helpers
-│   ├── commands_core.py         ← 核心命令
+│   ├── commands_core.py         ← 核心命令（report/guards/check/init）
+│   ├── commands_demo.py         ← demo 演示
+│   ├── commands_pipeline.py     ← 流水线（pre/post/review/export）
+│   ├── commands_story.py        ← Story Contract
+│   ├── commands_memory.py       ← RAG 记忆查询
+│   ├── commands_agents.py       ← Agent 陪审团
+│   ├── commands_diagnostic.py   ← 诊断（board/stability-check）
 │   ├── commands_db.py           ← DB 管理
 │   ├── commands_outline.py      ← 大纲管理
 │   ├── commands_menu.py         ← 菜单/帮助
 │   └── commands_status.py       ← 状态诊断
-├── guards/                      ← 23 个门禁规则模块
+├── guards/                      ← 21 个门禁规则模块
 ├── task_card/                   ← 写前任务卡
 ├── voice/                       ← Voice Pack 加载器
 ├── meme/                        ← Meme Pack 加载器
