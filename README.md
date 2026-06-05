@@ -16,7 +16,7 @@
 |---|------|------|
 | 1 | **多小说独立数据库** | 每本小说一个 slot，独立 `novel.db`，内容不串库 |
 | 2 | **大纲版本管理** | 无大纲不开写；新小说自动建库；原小说出新版大纲只新增版本，不覆盖旧数据 |
-| 3 | **Agent 陪审团** | 18 个自然度审稿 Agent + 20 个陪审团发布前检查，覆盖角色口吻、AI 腔、场景落地、情绪递进、伏笔、追读力 |
+| 3 | **Agent 陪审团** | 20 个自然度审稿 Agent + 20 个陪审团发布前检查，覆盖角色口吻、AI 腔、场景落地、情绪递进、伏笔、追读力 |
 | 4 | **Story Contract 主链** | 写前生成章节合同，写后提交章节记录，追踪目标、人物状态、伏笔推进和世界观连续 |
 | 5 | **普通用户菜单** | 终端输入 `python novel.py menu` 即可进入交互菜单，不要求记命令 |
 | 6 | **三端适配** | Windows / macOS / Linux，Shell 脚本 + 跨平台路径检测 |
@@ -24,7 +24,7 @@
 | 8 | **人工味质量层 (Human Texture)** | 8 个质量 guard 自动运行：水文检测、剧情进度控制、陈词滥句、冲突压力、情绪总结、生活质感、节奏、声音多样性 |
 | 9 | **题材阈值预设** | 13 种题材独立阈值，`--genre xianxia --pace slow` 参数调优 |
 | 10 | **角色综合管理** | 角色声纹卡 / 性格配置 / 做事风格，`python novel.py voice|character|texture` |
-| 11 | **Genre/Style Pack 预设** | 13 种 genre + 8 种 style 写作预设，`novel.py genre|style` 查看 |
+| 11 | **Genre/Style Pack 预设** | 10 种 genre + 9 种 style 写作预设，`novel.py genre|style` 查看 |
 | 12 | **MCP 中文菜单桥接层** | 10 个安全 MCP 工具，AI 客户端通过中文直接操作引擎（`novel_menu`/`novel_status`/`novel_agents_review`/`novel_export_txt` 等），零命令、零路径暴露 |
 
 ---
@@ -92,7 +92,7 @@ ingest to SQLite       ← 入库 + 切片 + FTS + 摘要
 | 体系 | 数量 | 触发方式 | 职责 |
 |------|------|---------|------|
 | **Guard 门禁** | 22 个精确规则 | post 自动运行 | 拦截硬性错误：幻觉、连续性断裂、AI 腔、破折号超标 |
-| **Agent 陪审团** | 18 个自然度 Agent | 手动 `agents review` | 评估软性质量：动作自然度、潜台词、情绪递进、场景落地、节奏呼吸 |
+| **Agent 陪审团** | 20 个自然度 Agent | 手动 `agents review` | 评估软性质量：动作自然度、潜台词、情绪递进、场景落地、节奏呼吸 |
 | **发布前陪审团** | 20 个配置 Agent | 发布前审稿 | 风险分级、主编汇总、must_fix / should_fix / keep 分类 |
 
 Guard 和 Agent 互补不重叠。Guard 保证不写错，Agent 帮助写更好。
@@ -187,7 +187,6 @@ src/
 ├── guards/                      ← 22 个门禁规则模块
 ├── task_card/                   ← 写前任务卡
 ├── voice/                       ← Voice Pack 加载器
-├── meme/                        ← Meme Pack 加载器
 └── report/                      ← HTML 报告生成
 
 scripts/
