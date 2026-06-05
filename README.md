@@ -177,15 +177,21 @@ python novel.py stability-check --full
 输出示例：
 
 ```
-[✓] 版本号一致性
-[✓] 配置文件
+[✓] 版本号一致性: VERSION=v0.7.1
+[✓] 配置文件: config.json 可解析
 [✓] workspace 初始化
+[✓] 默认 slot 完整: N 个 slot
+[✓] active slot DB
+[✓] Agent 类: 18+
 [✓] pytest: exit=0
+[✓] 交叉平台: 通过
+[✓] Slot FTS 完整性
+[✓] 结构自检: DB✓ CFG✓ WS✓
 [✓] demo 全流程: exit=0
-[✓] Story 健康: OK
-[✓] 交叉平台: 7/7 checks passed
 
-稳定性评分: 100/100  建议: 可以发布正式版
+稳定性评分: 95/100
+P0 问题: 0 个
+建议: 可以发布正式版
 ```
 
 ---
