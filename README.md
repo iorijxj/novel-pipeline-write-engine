@@ -16,17 +16,16 @@
 |---|------|------|
 | 1 | **多小说独立数据库** | 每本小说一个 slot，独立 `novel.db`，内容不串库 |
 | 2 | **大纲版本管理** | 无大纲不开写；新小说自动建库；原小说出新版大纲只新增版本，不覆盖旧数据 |
-| 3 | **Agent 陪审团** | 20 个自然度审稿 Agent + 20 个陪审团发布前检查，覆盖角色口吻、AI 腔、场景落地、情绪递进、伏笔、追读力 |
+| 3 | **Agent 陪审团** | 20 个评审 Agent，覆盖角色口吻、AI 腔、场景落地、情绪递进、伏笔、追读力 |
 | 4 | **Story Contract 主链** | 写前生成章节合同，写后提交章节记录，追踪目标、人物状态、伏笔推进和世界观连续 |
 | 5 | **普通用户菜单** | 终端输入 `python novel.py menu` 即可进入交互菜单，不要求记命令 |
-| 6 | **三端适配** | Windows / macOS / Linux，Shell 脚本 + 跨平台路径检测 |
-| 7 | **发布稳定性检查** | `stability-check --full` 一键验收，覆盖版本号、pytest、demo 全流程、cross-platform |
-| 8 | **人工味质量层 (Human Texture)** | 8 个质量 guard 自动运行：水文检测、剧情进度控制、陈词滥句、冲突压力、情绪总结、生活质感、节奏、声音多样性 |
-| 9 | **题材阈值预设** | 13 种题材独立阈值，`--genre xianxia --pace slow` 参数调优 |
-| 10 | **角色综合管理** | 角色声纹卡 / 性格配置 / 做事风格，`python novel.py voice|character|texture` |
-| 11 | **Genre/Style Pack 预设** | 10 种 genre + 9 种 style 写作预设，`novel.py genre|style` 查看 |
-| 12 | **MCP 中文菜单桥接层** | 10 个安全 MCP 工具，AI 客户端通过中文直接操作引擎（`novel_menu`/`novel_status`/`novel_agents_review`/`novel_export_txt` 等），零命令、零路径暴露 |
-| 13 | **角色精神状态系统** | 角色卡第四层：15 类精神状况（PTSD/抑郁/焦虑等），severity 0-5 + 诱因 + 触发词 + 章节追踪，`character mental` CLI 管理，大纲中自动扫描推荐 |
+| 6 | **三端适配** | Windows，Shell 脚本 |
+| 7 | **发布稳定性检查** | `python novel.py stability-check` 一键验收，覆盖版本号、pytest、demo 全流程 |
+| 8 | **人工味质量层 (Human Texture)** | 8 个子检测自动运行：水文、剧情进度、陈词滥句、冲突压力、情绪总结、生活质感、节奏、声线多样性 |
+| 9 | **题材写作预设** | 25 种 genre + 19 种 style 写作预设，`python novel.py genre` / `python novel.py style` 查看 |
+| 10 | **角色综合管理** | 角色卡 4 维度 30 字段（声纹/性格/做事风格/叙事层）+ 精神状态管理，`python novel.py character` 全面管理 |
+| 11 | **MCP 中文菜单桥接层** | 19 个安全 MCP 工具，AI 客户端通过中文直接操作引擎，零命令暴露 |
+| 13 | **角色精神状态系统** | 角色卡第五层：15 类精神状况（PTSD/抑郁/焦虑等），severity 0-5 + 诱因 + 触发词 + 章节追踪，`character mental` CLI 管理 |
 
 ---
 
@@ -78,34 +77,41 @@ python novel.py pre 1             # 写前任务卡
 python novel.py post 1            # 入库 + 27 Guard 门禁
 python novel.py agents review 1 --mode full  # 20 Agent 审稿
 
-# 角色管理 (v0.7.2)
+# 角色管理
 python novel.py character list              # 列出角色
-python novel.py character show <角色名>     # 查看角色卡(含精神状态)
-python novel.py character mental <角色名>   # 管理精神状态
-python novel.py character mental-scan       # 从大纲扫描推荐精神状态
+python novel.py character show <角色名>     # 查看完整角色卡（含叙事层）
+python novel.py character edit <名> <字段> <值>  # 编辑声纹/性格/叙事层
+python novel.py character mental <名>       # 管理精神状态
 
 # 质量检测
 python novel.py texture check 1             # 人工味质量层 (8 项)
 python novel.py check <文件路径>            # 单章检查
+python novel.py revise 1 --mode suggest     # 自动改稿
 
-# 故事合同
-python novel.py story init                  # 初始化合同目录
-python novel.py story contract              # 生成合同
-python novel.py story commit                # 提交章节记录
+# 故事链
 python novel.py story health                # 故事链健康检查
 
-# 题材与风格
-python novel.py genre list                  # 查看题材预设
-python novel.py style list                  # 查看风格预设
+# 上下文 / 伏笔 / 情节线
+python novel.py context show 1              # 查看某章上下文
+python novel.py context gap                 # 检测物品断层
+python novel.py promises list               # 读者承诺管理
+python novel.py plot-threads list           # 情节线管理
+
+# 世界观与题材
+python novel.py worldbuilding list          # 世界观条目
+python novel.py genre list                  # 25 种题材预设
+python novel.py style list                  # 19 种风格预设
+
+# 查询
+python novel.py query "主角的玉佩在哪里"    # 自然语言查询
+python novel.py rag status                  # RAG 状态
 
 # 发布验收
-python novel.py stability-check --full
+python novel.py stability-check
 
-# 查看报告
+# 查看报告 & 导出
 python novel.py report
-
-# 导出
-python novel.py export --slug demo_novel --format txt
+python novel.py export --slug <slug>
 ```
 
 ---
@@ -136,9 +142,9 @@ ingest to SQLite       ← 入库 + 切片 + FTS + 摘要
 
 | 体系 | 数量 | 触发方式 | 职责 |
 |------|------|---------|------|
-| **Guard 门禁** | 27 个精确规则 | post 自动运行 | 拦截硬性错误：幻觉、连续性断裂、AI 腔、破折号超标 |
-| **Agent 陪审团** | 20 个自然度 Agent | 手动 `agents review` | 评估软性质量：动作自然度、潜台词、情绪递进、场景落地、节奏呼吸 |
-| **发布前陪审团** | 20 个配置 Agent | 发布前审稿 | 风险分级、主编汇总、must_fix / should_fix / keep 分类 |
+| **Guard 门禁** | 27 个（draft=5 / standard=18 / submission=26） | post 自动运行 | 拦截：幻觉、连续性断裂、AI腔、开篇乏力、感官空白、节奏失衡、视角跳跃 |
+| **Agent 陪审团** | 20 个评审 Agent | 手动 `agents review` | 评估：动作自然度、潜台词、情绪递进、场景落地、节奏呼吸 |
+| **发布前审稿** | 20 Agent + 主编汇总 | 发布前运行 | 风险分级、must_fix / should_fix / keep 分类 |
 
 Guard 和 Agent 互补不重叠。Guard 保证不写错，Agent 帮助写更好。
 
