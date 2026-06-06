@@ -78,7 +78,7 @@ python novel.py pre 1             # 写前任务卡
 python novel.py post 1            # 入库 + 27 Guard 门禁
 python novel.py agents review 1 --mode full  # 20 Agent 审稿
 
-# 角色管理 (v0.7.1)
+# 角色管理 (v0.7.2)
 python novel.py character list              # 列出角色
 python novel.py character show <角色名>     # 查看角色卡(含精神状态)
 python novel.py character mental <角色名>   # 管理精神状态
@@ -198,7 +198,7 @@ python novel.py stability-check --full
 输出示例：
 
 ```
-[✓] 版本号一致性: VERSION=v0.7.1
+[✓] 版本号一致性: VERSION=v0.7.2
 [✓] 配置文件: config.json 可解析
 [✓] workspace 初始化
 [✓] 默认 slot 完整: N 个 slot
