@@ -50,8 +50,7 @@
 
 请通过以下方式联系：
 
-- **Email**: [你的邮箱]
+- **Email**: meikongyang1314@163.com
 - **GitHub Issues**: 标记为 `license-inquiry`
-- **微信**: [微信号]
 
 付款后，您将收到由版权方签名的 PDF 许可协议。
