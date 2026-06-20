@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 ![Version](https://img.shields.io/badge/version-v0.9.0-orange)
 ![Surfaces](https://img.shields.io/badge/surfaces-Hermes%20%7C%20Codex%20%7C%20Claude-brightgreen)
-![License](https://img.shields.io/badge/license-see%20LICENSE-lightgrey)
+![License](https://img.shields.io/badge/license-AGPL%203.0-blue)
 
 `ProseForge` 是一个面向长篇小说的工程化写作系统。  
 它不只是“生成一章文本”的提示词仓库，而是一套从大纲、写前准备、写后门禁、审读、改写到导出的完整工作流。
