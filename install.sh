@@ -6,7 +6,7 @@ set -e
 PYTHON=${PYTHON:-python3}
 
 echo "============================================"
-VER=$(cat VERSION 2>/dev/null || echo "v0.8.0")
+VER=$(cat VERSION 2>/dev/null || echo "0.8.0")
 echo "  HermesForgeN $VER"
 echo "  Hermes Plugin 安装 (Mac / Linux)"
 echo "============================================"
