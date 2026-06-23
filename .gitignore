@@ -30,15 +30,13 @@ config/license_server.json
 CLAUDE.md
 database/
 workspace/
-exports/context_*.txt
 tmp/
 configs/scc_menu.json
 
 # Pipeline runtime output — local artifacts
-exports/pipeline_state/
-exports/reports/
-exports/chapter_briefs/
-exports/run_reports/
+# Generated pipeline artifacts
+exports/
+
 src/.story/commits/
 
 
