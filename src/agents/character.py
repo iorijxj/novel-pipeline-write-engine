@@ -3,10 +3,12 @@
 
 import re
 import sqlite3, json
+from contextlib import closing
 from pathlib import Path
 from typing import Optional
 
 from .base_agent import BaseAgent
+from src.db._conn import connect_sqlite
 
 LQ = "\u201c"
 RQ = "\u201d"
@@ -386,11 +388,10 @@ def load_voice_context(
     # 1. Try database
     if voice_cfg.get("use_database_profiles", True) and Path(db_path).exists():
         try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            profiles = _load_profiles_from_db(conn, novel_slug)
-            packs = _load_packs_from_db(conn)
-            conn.close()
+            with closing(connect_sqlite(db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                profiles = _load_profiles_from_db(conn, novel_slug)
+                packs = _load_packs_from_db(conn)
             if profiles:
                 source = "db"
         except Exception as e:

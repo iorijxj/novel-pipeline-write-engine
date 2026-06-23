@@ -1,6 +1,7 @@
 import sqlite3
 
-from src.pipeline.ingest import _build_context_injection, _ensure_chapter_contexts_table
+# 上下文提取已统一到 chapter_context.py（ingest 通过 import 复用），故从权威源测试
+from src.pipeline.chapter_context import _build_context_injection, _ensure_chapter_contexts_table
 
 
 def test_context_injection_handles_legacy_database_without_table():

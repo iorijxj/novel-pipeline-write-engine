@@ -1,9 +1,11 @@
 """story/health — Check story chain health (three-tier: OK / WARN / FAIL)."""
 import json
+from contextlib import closing
 from pathlib import Path
 from typing import List
 
 from src.story import resolve_story_dir
+from src.db._conn import connect_sqlite
 
 
 def check_health(project_root: Path) -> dict:
@@ -145,30 +147,29 @@ def check_health(project_root: Path) -> dict:
                 db_path = ws_dir / active / "novel.db"
                 if db_path.exists():
                     import sqlite3
-                    conn = sqlite3.connect(str(db_path))
-                    conn.row_factory = sqlite3.Row
-                    cur = conn.cursor()
-                    # Find max chapter from commits
-                    if commits_dir.exists():
-                        commit_files = sorted(commits_dir.glob("chapter_*_commit.json"))
-                        if commit_files:
-                            max_ch = max(int(f.stem.split("_")[1]) for f in commit_files)
-                            stale_threshold = max_ch - 20
-                            if stale_threshold >= 1:
-                                cur.execute(
-                                    "SELECT promise_title, introduced_chapter "
-                                    "FROM reader_promises "
-                                    "WHERE status='open' AND introduced_chapter <= ?",
-                                    (stale_threshold,)
-                                )
-                                stale_rows = cur.fetchall()
-                                if stale_rows:
-                                    for s in stale_rows:
-                                        gap = max_ch - (s["introduced_chapter"] or 0)
-                                        warnings.append(
-                                            f"读者承诺「{s['promise_title']}」已搁置 {gap} 章未兑现"
-                                        )
-                    conn.close()
+                    with closing(connect_sqlite(db_path)) as conn:
+                        conn.row_factory = sqlite3.Row
+                        cur = conn.cursor()
+                        # Find max chapter from commits
+                        if commits_dir.exists():
+                            commit_files = sorted(commits_dir.glob("chapter_*_commit.json"))
+                            if commit_files:
+                                max_ch = max(int(f.stem.split("_")[1]) for f in commit_files)
+                                stale_threshold = max_ch - 20
+                                if stale_threshold >= 1:
+                                    cur.execute(
+                                        "SELECT promise_title, introduced_chapter "
+                                        "FROM reader_promises "
+                                        "WHERE status='open' AND introduced_chapter <= ?",
+                                        (stale_threshold,)
+                                    )
+                                    stale_rows = cur.fetchall()
+                                    if stale_rows:
+                                        for s in stale_rows:
+                                            gap = max_ch - (s["introduced_chapter"] or 0)
+                                            warnings.append(
+                                                f"读者承诺「{s['promise_title']}」已搁置 {gap} 章未兑现"
+                                            )
     except Exception:
         pass
 

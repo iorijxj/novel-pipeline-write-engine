@@ -5,6 +5,7 @@
 """
 import re
 import json
+from contextlib import closing
 from pathlib import Path
 from collections import Counter
 
@@ -57,6 +58,7 @@ STORY_FIELDS = [
 
 # ── 精神状态维度（从独立模块重新导出）──
 from .character_psychology_crud import MENTAL_STATE_CATEGORIES
+from src.db._conn import connect_sqlite
 
 PERSONALITY_CHOICES = {
     "core": ["沉稳", "暴躁", "谨慎", "冲动", "温和", "狡诈", "天真", "冷酷"],
@@ -340,16 +342,14 @@ def _ensure_char_db_row(project_root: Path, name: str) -> bool:
     if not db_path:
         return False
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        cur = conn.execute("SELECT id FROM characters WHERE name=?", (name,))
-        if not cur.fetchone():
-            conn.execute(
-                "INSERT INTO characters (novel_id, name, status) VALUES (1, ?, 'active')",
-                (name,),
-            )
-            conn.commit()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            cur = conn.execute("SELECT id FROM characters WHERE name=?", (name,))
+            if not cur.fetchone():
+                conn.execute(
+                    "INSERT INTO characters (novel_id, name, status) VALUES (1, ?, 'active')",
+                    (name,),
+                )
+                conn.commit()
         return True
     except Exception:
         return False
@@ -361,15 +361,13 @@ def get_char_db_row(project_root: Path, name: str) -> dict | None:
     if not db_path:
         return _db_fallback(name)
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        cur = conn.execute(
-            "SELECT name, alias, role, identity, personality, motivation, "
-            "ability, relationship, arc, status, tags FROM characters WHERE name=?",
-            (name,),
-        )
-        row = cur.fetchone()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            cur = conn.execute(
+                "SELECT name, alias, role, identity, personality, motivation, "
+                "ability, relationship, arc, status, tags FROM characters WHERE name=?",
+                (name,),
+            )
+            row = cur.fetchone()
         if not row:
             return _db_fallback(name)
         cols = ["name", "alias", "role", "identity", "personality_info",
@@ -410,11 +408,9 @@ def save_char_db_field(project_root: Path, name: str, field: str, value: str) ->
         return False
 
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        conn.execute(f"UPDATE characters SET {col}=? WHERE name=?", (value, name))
-        conn.commit()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            conn.execute(f"UPDATE characters SET {col}=? WHERE name=?", (value, name))
+            conn.commit()
         return True
     except Exception:
         return False
@@ -426,11 +422,9 @@ def delete_char_db_row(project_root: Path, name: str) -> bool:
     if not db_path:
         return False
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        conn.execute("UPDATE characters SET status='deleted' WHERE name=?", (name,))
-        conn.commit()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            conn.execute("UPDATE characters SET status='deleted' WHERE name=?", (name,))
+            conn.commit()
         return True
     except Exception:
         return False
@@ -446,15 +440,13 @@ def _migrate_focus_state(project_root: Path) -> bool:
     if not db_path:
         return False
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        # Check if column exists
-        cur = conn.execute("PRAGMA table_info(characters)")
-        cols = [c[1] for c in cur.fetchall()]
-        if "focus_state" not in cols:
-            conn.execute("ALTER TABLE characters ADD COLUMN focus_state TEXT DEFAULT '活跃'")
-            conn.commit()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            # Check if column exists
+            cur = conn.execute("PRAGMA table_info(characters)")
+            cols = [c[1] for c in cur.fetchall()]
+            if "focus_state" not in cols:
+                conn.execute("ALTER TABLE characters ADD COLUMN focus_state TEXT DEFAULT '活跃'")
+                conn.commit()
         return True
     except Exception:
         return False
@@ -467,11 +459,9 @@ def get_focus_state(project_root: Path, name: str) -> str:
         return "活跃"
     try:
         _migrate_focus_state(project_root)
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        cur = conn.execute("SELECT focus_state FROM characters WHERE name=?", (name,))
-        row = cur.fetchone()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            cur = conn.execute("SELECT focus_state FROM characters WHERE name=?", (name,))
+            row = cur.fetchone()
         return row[0] if row and row[0] else "活跃"
     except Exception:
         return "活跃"
@@ -487,11 +477,9 @@ def set_focus_state(project_root: Path, name: str, state: str) -> bool:
     if not db_path:
         return False
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        conn.execute("UPDATE characters SET focus_state=? WHERE name=?", (state, name))
-        conn.commit()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            conn.execute("UPDATE characters SET focus_state=? WHERE name=?", (state, name))
+            conn.commit()
         return True
     except Exception:
         return False
@@ -505,21 +493,19 @@ def _migrate_relation_table(project_root: Path) -> bool:
     if not db_path:
         return False
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS character_relationships (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                novel_id INTEGER DEFAULT 1,
-                char_a TEXT NOT NULL,
-                char_b TEXT NOT NULL,
-                relation_type TEXT NOT NULL DEFAULT '',
-                description TEXT DEFAULT '',
-                UNIQUE(novel_id, char_a, char_b)
-            )
-        """)
-        conn.commit()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS character_relationships (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    novel_id INTEGER DEFAULT 1,
+                    char_a TEXT NOT NULL,
+                    char_b TEXT NOT NULL,
+                    relation_type TEXT NOT NULL DEFAULT '',
+                    description TEXT DEFAULT '',
+                    UNIQUE(novel_id, char_a, char_b)
+                )
+            """)
+            conn.commit()
         return True
     except Exception:
         return False
@@ -535,15 +521,13 @@ def set_relation(project_root: Path, char_a: str, char_b: str,
     # 保证排序一致
     a, b = sorted([char_a, char_b])
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        conn.execute("""
-            INSERT INTO character_relationships (novel_id, char_a, char_b, relation_type)
-            VALUES (1, ?, ?, ?)
-            ON CONFLICT(novel_id, char_a, char_b) DO UPDATE SET relation_type=excluded.relation_type
-        """, (a, b, relation_type))
-        conn.commit()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            conn.execute("""
+                INSERT INTO character_relationships (novel_id, char_a, char_b, relation_type)
+                VALUES (1, ?, ?, ?)
+                ON CONFLICT(novel_id, char_a, char_b) DO UPDATE SET relation_type=excluded.relation_type
+            """, (a, b, relation_type))
+            conn.commit()
         return True
     except Exception:
         return False
@@ -557,11 +541,9 @@ def delete_relation(project_root: Path, char_a: str, char_b: str) -> bool:
         return False
     a, b = sorted([char_a, char_b])
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        conn.execute("DELETE FROM character_relationships WHERE char_a=? AND char_b=?", (a, b))
-        conn.commit()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            conn.execute("DELETE FROM character_relationships WHERE char_a=? AND char_b=?", (a, b))
+            conn.commit()
         return True
     except Exception:
         return False
@@ -574,11 +556,9 @@ def list_relations(project_root: Path) -> list[dict]:
     if not db_path:
         return []
     try:
-        import sqlite3
-        conn = sqlite3.connect(str(db_path))
-        cur = conn.execute("SELECT char_a, char_b, relation_type FROM character_relationships")
-        rows = cur.fetchall()
-        conn.close()
+        with closing(connect_sqlite(db_path)) as conn:
+            cur = conn.execute("SELECT char_a, char_b, relation_type FROM character_relationships")
+            rows = cur.fetchall()
         return [{"char_a": r[0], "char_b": r[1], "type": r[2]} for r in rows]
     except Exception:
         return []

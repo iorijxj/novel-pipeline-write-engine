@@ -13,6 +13,7 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import List, Dict, Optional
+from src.db._conn import connect_sqlite
 
 
 SEVERITY = {
@@ -30,7 +31,7 @@ class ArcChecker:
         self._ensure_tables()
 
     def _connect(self):
-        conn = sqlite3.connect(str(self.db_path))
+        conn = connect_sqlite(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -220,6 +221,15 @@ class ArcChecker:
         cur.execute("SELECT MAX(chapter_no) FROM chapter_contexts WHERE novel_id=?", (nid,))
         max_ch_row = cur.fetchone()
         max_written = max_ch_row[0] if max_ch_row and max_ch_row[0] else 0
+
+        # Fulfillment 对齐计数：一次查齐，避免循环内 N+1 连接
+        cur.execute(
+            """SELECT promise_id, COUNT(*) FROM arc_alignments
+               WHERE novel_id=? AND alignment_type='fulfillment' AND promise_id IS NOT NULL
+               GROUP BY promise_id""",
+            (nid,),
+        )
+        fulfillment_counts = {r[0]: r[1] for r in cur.fetchall()}
         conn.close()
 
         findings = []
@@ -248,13 +258,8 @@ class ArcChecker:
                     "message": f"承诺「{p['promise_title']}」第{intro}章提出，应于第{expected_max}章前兑现，已逾期{overdue}章",
                 })
 
-            # Check alignment records
-            cur2 = self._connect().cursor()
-            cur2.execute("""SELECT COUNT(*) FROM arc_alignments
-                WHERE novel_id=? AND promise_id=? AND alignment_type='fulfillment'""",
-                         (nid, p["id"]))
-            aligned = cur2.fetchone()[0]
-            cur2.connection.close()
+            # Check alignment records（用预取的计数，避免循环内重复连接）
+            aligned = fulfillment_counts.get(p["id"], 0)
             if aligned == 0 and intro > 0:
                 findings.append({
                     "type": "promise_unaligned",

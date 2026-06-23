@@ -10,7 +10,11 @@ Guard Summary:  all guards' combined result — THE single truth source
 from dataclasses import dataclass, field, asdict
 from typing import Literal, Optional
 import json
-from version import get_version
+try:
+    from version import get_version
+except ImportError:  # 脱离 src 根单独 import 时兜底
+    def get_version() -> str:
+        return "unknown"
 
 
 Severity = Literal["PASS", "WARN", "FAIL"]

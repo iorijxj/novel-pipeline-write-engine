@@ -17,6 +17,7 @@ from src.pipeline._base import (
     load_config, story_health, load_characters,
     write_json_atomic,
 )
+from src.utils.error_handling import log_optional_failure
 from src.pipeline.chapter_context import _build_context_injection
 from src.pipeline.volume import (
     _resolve_story_for_deviation,
@@ -234,7 +235,7 @@ def run_pre(
                       f"must_fix={len(ce.get('must_fix', []))}, should_fix={len(ce.get('should_fix', []))}")
                 log_entries.append(f"读取第{prev_ch}章jury({jury.get('status')})")
             except (TypeError, ValueError) as e:
-                print(f"  [WARN] 上章jury读取失败: {e}")
+                log_optional_failure("pre: 上章jury读取", e)
 
         # ── 读取上章 orchestrator 报告（更细粒度的 guard 建议）──
         orch_path = app.exports_root / "reports" / f"chapter_{prev_ch:03d}_orchestrator_report.json"
@@ -248,7 +249,7 @@ def run_pre(
                 )
                 log_entries.append(f"读取第{prev_ch}章orchestrator({orch_report.get('final_status','?')})")
             except (TypeError, ValueError) as e:
-                print(f"  [WARN] chapter {prev_ch} orchestrator report load failed: {e}")
+                log_optional_failure(f"pre: chapter {prev_ch} orchestrator report load", e)
         # ── brief + jury 结束 ──
     else:
         jury = None
@@ -275,7 +276,7 @@ def run_pre(
                       f"角色弧线={len(char_arcs) if char_arcs else 0}")
                 log_entries.append(f"story_health({health['status']})")
         except (OSError, json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as e:
-            print(f"  [WARN] 故事合同读取失败: {e}")
+            log_optional_failure("pre: 故事合同读取", e)
 
     # ── 加载题材约束和上章 texture 报告 ──
     genre_preset = {}
@@ -288,14 +289,14 @@ def run_pre(
                 all_presets = yaml.safe_load(_preset_path.read_text(encoding="utf-8"))
                 genre_preset = all_presets.get(genre, all_presets.get("default", {}))
         except (ImportError, OSError, AttributeError, ValueError, yaml.YAMLError) as e:
-            print(f"  [WARN] genre preset load failed: {e}")
+            log_optional_failure("pre: genre preset load", e)
     if prev_ch >= 1:
         _tex_path = app.exports_root / "reports" / f"chapter_{prev_ch:03d}_texture_report.json"
         if _tex_path.exists():
             try:
                 prev_texture = json.loads(_tex_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
-                print(f"  [WARN] chapter {prev_ch} texture report load failed: {e}")
+                log_optional_failure(f"pre: chapter {prev_ch} texture report load", e)
 
     # 最近3章摘要
     print("\n  [OK] 最近3章:")
@@ -377,7 +378,7 @@ def run_pre(
             else:
                 scan_text += outline_content[:1000] + " "
     except (OSError, TypeError, ValueError, AttributeError) as e:
-        print(f"  [WARN] outline context load failed: {e}")
+        log_optional_failure("pre: outline context load", e)
     if scan_text.strip():
         from src.rag import HAS_VECTOR_DEPS, index_worldbuilding, search_worldbuilding
 
@@ -435,7 +436,7 @@ def run_pre(
                 if content_preview:
                     print(f"          {content_preview}")
     except sqlite3.Error as e:
-        print(f"  [WARN] plot thread reminder failed: {e}")
+        log_optional_failure("pre: plot thread reminder", e)
 
     # ── 读者承诺提醒 ──
     try:
@@ -453,7 +454,7 @@ def run_pre(
                 intro = f" 第{p['introduced_chapter']}章提出" if p["introduced_chapter"] else ""
                 print(f"    [{imp_bar}] {p['promise_title']}{intro}")
     except sqlite3.Error as e:
-        print(f"  [WARN] reader promise reminder failed: {e}")
+        log_optional_failure("pre: reader promise reminder", e)
 
     # context_pack (包含标题骨架)
     app.exports_root.mkdir(parents=True, exist_ok=True)
@@ -638,22 +639,22 @@ def run_pre(
                     _label = "stable" if abs(_delta) <= 3 else f"{_arrow} {_delta:+d}"
                     print(f"  {_short:20s} {_label}")
 
-    # ── 上章裂隙触发词 ──
+    # ── 上章精神状态触发词（仅当 slot 配置 mental_triggers.json 时 post 会写入）──
     if prev_ch >= 1:
         prev_state_path = app.state_dir / f"chapter_{prev_ch:03d}_state.json"
         if prev_state_path.exists():
             try:
                 _ps = json.loads(prev_state_path.read_text(encoding="utf-8"))
-                _trig_hits = _ps.get("裂隙触发词命中", 0)
-                _trig_detail = _ps.get("裂隙触发词详情", {})
+                _trig_hits = _ps.get("mental_trigger_hits", 0)
+                _trig_detail = _ps.get("mental_trigger_detail", {})
                 if _trig_hits >= 2:
                     if _trig_hits >= 4:
-                        print(f"  \U0001f534 上章裂隙触发词出现{_trig_hits}次: {_trig_detail}")
-                        print(f"     \u2192 \u5efa\u8bae\u672c\u7ae0\u5199\u4e00\u6bb5\u89e3\u79bb\u620f")
+                        print(f"  \U0001f534 上章精神触发词出现{_trig_hits}次: {_trig_detail}")
+                        print(f"     \u2192 \u5efa\u8bae\u672c\u7ae0\u5199\u4e00\u6bb5\u89e3\u538b/\u89e3\u79bb\u620f")
                     else:
-                        print(f"  \u26a0\ufe0f 上章裂隙触发词出现{_trig_hits}次: {_trig_detail}")
+                        print(f"  \u26a0\ufe0f 上章精神触发词出现{_trig_hits}次: {_trig_detail}")
             except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
-                print(f"  [WARN] read prev state failed: {exc}")
+                log_optional_failure("pre: read prev state", exc)
 
     if char_cards or chars:
         print(f"  \u2500\u2500\u2500 \u51fa\u573a\u89d2\u8272 \u2500\u2500\u2500")
@@ -769,9 +770,9 @@ def run_pre(
                                         others_str = "、".join(others)
                                         print(f"  {cname} ←{rtype}→ {others_str}")
             except (ImportError, AttributeError, KeyError, TypeError) as exc:
-                print(f"  [WARN] auto-extract relations failed: {exc}")
+                log_optional_failure("pre: auto-extract relations", exc)
     except (ImportError, AttributeError, KeyError, TypeError) as exc:
-        print(f"  [WARN] character relations skipped: {exc}")
+        log_optional_failure("pre: character relations skipped", exc)
 
     # ── 2.3 审稿建议 → writing_rules 自动固化 ──
     if jury and jury.get("chief_editor"):

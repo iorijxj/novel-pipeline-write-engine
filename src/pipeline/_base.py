@@ -12,6 +12,7 @@ from version import get_version
 
 from src.runtime import PipelineContext, build_pipeline_context, resolve_slot_db_path
 from src.utils.config_utils import find_project_root, load_default_config, load_json_config
+from src.db._conn import connect_sqlite
 
 try:
     from src.story import story_health
@@ -80,7 +81,7 @@ def now() -> str:
 
 def connect(app_inst: App | PipelineContext | None = None) -> sqlite3.Connection:
     ctx = _require_context(app_inst)
-    conn = sqlite3.connect(str(ctx.db_path))
+    conn = connect_sqlite(ctx.db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -120,18 +121,13 @@ def _chunk_text(text: str, min_size: int = 800, max_size: int = 1500):
 
 
 def _count_chinese(text: str) -> int:
-    return len(
-        [
-            c
-            for c in text
-            if "\u4e00" <= c <= "\u9fff" or "\u3000" <= c <= "\u303f" or "\uff00" <= c <= "\uffef"
-        ]
-    )
+    from src.utils.text_metrics import count_chinese
+    return count_chinese(text)
 
 
 def ensure_tables(app_inst: App | PipelineContext | None = None):
     ctx = _require_context(app_inst)
-    conn = sqlite3.connect(str(ctx.db_path))
+    conn = connect_sqlite(ctx.db_path)
     cur = conn.cursor()
     cur.execute(
         """

@@ -155,8 +155,9 @@ class BaseAgent:
 
     @staticmethod
     def _count_chinese(text: str) -> int:
-        """Count Chinese characters in text."""
-        return len([c for c in text if '\u4e00' <= c <= '\u9fff'])
+        """Count Chinese characters in text. \u59d4\u6258 utils.text_metrics\uff08\u5168\u4ed3\u552f\u4e00\u53e3\u5f84\uff09\u3002"""
+        from src.utils.text_metrics import count_chinese
+        return count_chinese(text)
 
     @staticmethod
     def _get_paragraphs(content: str, tail_chars: int = 0) -> list:

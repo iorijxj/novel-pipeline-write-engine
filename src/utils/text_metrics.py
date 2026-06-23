@@ -12,6 +12,23 @@ from collections import Counter
 from typing import Iterable
 
 
+def count_chinese(text: str) -> int:
+    """全仓库唯一的中文字数口径：CJK 表意 + CJK 标点 + 全角字符。
+
+    曾在 _base.py（含标点/全角）与 base_agent.py（仅汉字）各有一份且口径不同，
+    导致 word_count_gate 与 agent 自检字数不一致。此处合一，采用关键门禁
+    （word_count_gate）原有的 _base 口径。
+    """
+    if not text:
+        return 0
+    return len([
+        c for c in text
+        if '一' <= c <= '鿿'
+        or '　' <= c <= '〿'
+        or '＀' <= c <= '￯'
+    ])
+
+
 def length_cv(values: Iterable[float]) -> float:
     """计算变异系数 CV = std / mean，对长度序列输出 0-∞ 浮点数。
 

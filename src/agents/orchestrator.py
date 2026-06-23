@@ -16,6 +16,9 @@ from .prose import ProseAgent
 from .reader import ReaderAgent
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]  # repo 根，与 pre.py / task_card_builder 读取锚点一致
+
+
 AGENT_REGISTRY = {
     "continuity": ContinuityAgent,
     "character": CharacterAgent,
@@ -25,6 +28,11 @@ AGENT_REGISTRY = {
     "detail": DetailAgent,
 }
 
+# light vs full **不是质量等级差异**，只是参与审稿的 agent 子集差异：
+#   - light：3 个 agent（continuity / prose / plot）—— 适合快速过一遍主链路
+#   - full：6 个 agent（额外加 character / reader / detail）—— 完整审稿
+# 两种模式所用每个 agent 内部的阈值、判定逻辑完全相同；区别只在"跑哪几位 agent"。
+# CLI 入口（plugin 的 --mode light|full）已沿用此命名，重命名会破坏外部脚本，故保留。
 MODE_AGENTS = {
     "light": ["continuity", "prose", "plot"],
     "full": ["continuity", "character", "prose", "plot", "reader", "detail"],
@@ -37,10 +45,17 @@ class AgentOrchestrator:
     def __init__(self, config: dict = None):
         self.config = config or {}
         self.agent_configs = self.config.get("agents", {})
-        self.output_dir = self.config.get("output_dir", "reports/agent_reviews")
+        # 默认锚定 repo 根的绝对路径，避免不传 config 的调用方（plugins/CLI）按 CWD 落盘
+        # 与读取方错位；显式传入的 output_dir 仍优先。
+        self.output_dir = self.config.get("output_dir") or str(_PROJECT_ROOT / "reports" / "agent_reviews")
         self.mode = self.config.get("mode", "light")
 
     def run(self, content: str, chapter_no: int = 0, mode: str = "light", context: dict = None) -> dict:
+        """执行多 Agent 审读。
+
+        mode = "light" 跑 3 个 agent，mode = "full" 跑 6 个——参见模块顶部 MODE_AGENTS 注释，
+        这是 agent 子集差异，不是质量阈值差异。
+        """
         context = context or {}
         mode = mode or self.mode
         agent_names = MODE_AGENTS.get(mode, MODE_AGENTS["light"])

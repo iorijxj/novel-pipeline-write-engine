@@ -105,15 +105,9 @@ class OutlineManager:
         return f"{base}_{ts}"
 
     def _title_to_slug(self, title: str) -> str:
-        """将中文标题转为可用作 slug 的字符串。
-
-        保留中文字符、字母、数字，替换其他字符为下划线。
-        SQLite TEXT / URL 路径均可正常处理 Unicode。
-        """
-        import re
-        clean = re.sub(r'[^\u4e00-\u9fff\w\-]', '_', title.strip())[:30]
-        clean = clean.strip("_").lower() or "novel"
-        return clean
+        """将标题转为 slug。委托 src.utils.slug.title_to_slug（全仓库唯一来源）。"""
+        from src.utils.slug import title_to_slug
+        return title_to_slug(title)
 
     def _snapshot_version(self, old_data: Dict) -> List[Dict]:
         """创建一个版本快照，追加到版本历史"""
@@ -142,13 +136,10 @@ class OutlineManager:
                     similarity_result: Dict = None) -> Dict:
         """
         添加新大纲（从文本内容）。
-        自动生成 ID 和 metadata。
-        返回: {"id": ..., "title": ..., "created": True/False, "similarity": {...}}
+        自动生成 ID 和 metadata。如果当前没有 active slot 或活跃 slot 不对应该 title，
+        会按 title 派生 slug 自动创建 / 切换到同名 slot。
+        返回: {"id": ..., "title": ..., "created": True/False, "similarity": {...}, "slot": ...}
         """
-        active = self._get_active_slot()
-        if not active:
-            return {"status": "error", "message": "没有活跃的工作区。请先运行 nf_初化 工具"}
-
         # 提取标题（优先使用传入标题，其次从文本内容智能提取）
         if not title:
             for line in content.strip().split("\n"):
@@ -178,6 +169,11 @@ class OutlineManager:
                 break
         if not title:
             title = "未命名大纲"
+
+        # 按 title 派生 slug 确保对应 slot 存在并设为 active
+        # （v0.9.0：slot 按大纲名命名，替代 slot_001/002/003 数字序号）
+        from src.db.slot_manager import SlotManager
+        active = SlotManager(self.project_root).ensure_slot_for_outline(title)
 
         outline_id = self._generate_outline_id(title)
 
@@ -220,14 +216,14 @@ class OutlineManager:
         proj["updated_at"] = datetime.now().isoformat()
         self._save_project_json(proj)
 
-        # v0.7.1-e: Insert novel row into slot's novels table
+        # Insert novel row into slot's novels table
         try:
-            import sqlite3 as _sql
+            from src.db._conn import connect_sqlite
             slot_dir = self._get_slot_dir(active)
             db_path = slot_dir / "novel.db"
             if db_path.exists():
                 _slug = self._title_to_slug(title)
-                _conn = _sql.connect(str(db_path))
+                _conn = connect_sqlite(db_path)
                 _conn.execute(
                     "INSERT OR IGNORE INTO novels(slug, title, status) VALUES(?,?,?)",
                     (_slug, title, "planning")
@@ -244,6 +240,7 @@ class OutlineManager:
             "status": "ok",
             "id": outline_id,
             "title": title,
+            "slot": active,
             "created": True,
             "chapter_count": chapter_count,
             "volume_count": volume_count,
@@ -585,260 +582,8 @@ class OutlineManager:
             "versions_count": len(versions),
         }
 
-    # ──────────────────────────────────────────────
-    #  12. Slot 管理（用于 P0-6: 自动创建新 slot）
-    # ──────────────────────────────────────────────
-
-    def _find_idle_slot(self) -> Optional[str]:
-        """查找空闲 slot（slot_002, slot_003）或返回 None。
-        空闲 = slot 目录存在但没有 outlines/ 下的 .json 文件。
-        """
-        reg = self._get_registry()
-        slots = reg.get("slots", [])
-        active = reg.get("active_slot", "")
-
-        for s in slots:
-            sid = s.get("id", "")
-            if sid == active:
-                continue
-            # Check if this slot is idle (no outlines)
-            od = self._outlines_dir(sid)
-            jsons = list(od.glob("*.json"))
-            if not jsons or (len(jsons) == 1 and jsons[0].stem == ".gitkeep"):
-                return sid
-        return None
-
-    def _get_next_slot_id(self) -> str:
-        """自动生成下一个 slot ID（如 slot_004, slot_006 等）"""
-        reg = self._get_registry()
-        slots = reg.get("slots", [])
-        max_idx = 0
-        for s in slots:
-            sid = s.get("id", "")
-            if sid.startswith("slot_"):
-                try:
-                    idx = int(sid.replace("slot_", ""))
-                    if idx > max_idx:
-                        max_idx = idx
-                except ValueError:
-                    pass
-        return f"slot_{max_idx + 1:03d}"
-
-    def _create_slot_structure(self, slot_id: str, name: str = "", description: str = "") -> Path:
-        """创建 slot 目录结构和 project.json + novel.db（v0.6.5-clean4: 统一建库）"""
-        import sqlite3
-        slot_dir = self.workspace_dir / slot_id
-        slot_dir.mkdir(parents=True, exist_ok=True)
-        for subdir in ["outlines", "chapters", "reports", "exports", "backups"]:
-            (slot_dir / subdir).mkdir(parents=True, exist_ok=True)
-
-        proj_file = slot_dir / "project.json"
-        proj_data = {
-            "name": name or slot_id,
-            "title": name or "未命名项目",
-            "active_outline": None,
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
-        }
-        proj_file.write_text(json.dumps(proj_data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        # v0.6.5-clean4: 确保 novel.db 存在（含 FTS5 表）
-        db_path = slot_dir / "novel.db"
-        if not db_path.exists():
-            conn = sqlite3.connect(str(db_path))
-            try:
-                # 委托 SlotManager._init_slot_db 的完整建库逻辑
-                from src.db.slot_manager import SlotManager
-                sm = SlotManager(self.project_root)
-                sm._init_slot_db(slot_dir)
-            except Exception:
-                # Fallback: 内联建库（仅 core 表 + FTS5）
-                conn.executescript("""\
-                    CREATE TABLE IF NOT EXISTS novels (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        slug TEXT UNIQUE NOT NULL,
-                        title TEXT NOT NULL,
-                        genre TEXT DEFAULT '',
-                        theme TEXT DEFAULT '',
-                        description TEXT DEFAULT '',
-                        target_words INTEGER DEFAULT 0,
-                        current_words INTEGER DEFAULT 0,
-                        status TEXT DEFAULT 'planning',
-                        created_at TEXT DEFAULT (datetime('now')),
-                        updated_at TEXT DEFAULT (datetime('now'))
-                    );
-                    CREATE TABLE IF NOT EXISTS volumes (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        novel_id INTEGER NOT NULL REFERENCES novels(id),
-                        volume_no INTEGER NOT NULL,
-                        title TEXT DEFAULT '',
-                        summary TEXT DEFAULT '',
-                        target_words INTEGER DEFAULT 0,
-                        UNIQUE(novel_id, volume_no)
-                    );
-                    CREATE TABLE IF NOT EXISTS chapters (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        novel_id INTEGER NOT NULL REFERENCES novels(id),
-                        volume_id INTEGER REFERENCES volumes(id),
-                        chapter_no INTEGER NOT NULL,
-                        title TEXT DEFAULT '',
-                        content TEXT DEFAULT '',
-                        summary TEXT DEFAULT '',
-                        word_count INTEGER DEFAULT 0,
-                        status TEXT DEFAULT 'draft',
-                        file_path TEXT DEFAULT '',
-                        created_at TEXT DEFAULT (datetime('now')),
-                        updated_at TEXT DEFAULT (datetime('now')),
-                        UNIQUE(novel_id, chapter_no)
-                    );
-                    CREATE TABLE IF NOT EXISTS chapter_contexts (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        novel_id INTEGER NOT NULL REFERENCES novels(id),
-                        chapter_id INTEGER NOT NULL REFERENCES chapters(id),
-                        chapter_no INTEGER NOT NULL,
-                        character_locations TEXT DEFAULT '{}',
-                        active_items TEXT DEFAULT '[]',
-                        unresolved_threads TEXT DEFAULT '[]',
-                        emotional_states TEXT DEFAULT '{}',
-                        world_state TEXT DEFAULT '',
-                        ending_state TEXT DEFAULT '',
-                        hooks_for_next TEXT DEFAULT '',
-                        raw_summary TEXT DEFAULT '',
-                        created_at TEXT DEFAULT (datetime('now')),
-                        UNIQUE(novel_id, chapter_id)
-                    );
-                    CREATE TABLE IF NOT EXISTS memories (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        type TEXT DEFAULT 'note',
-                        project TEXT DEFAULT '',
-                        title TEXT NOT NULL,
-                        content TEXT NOT NULL,
-                        tags TEXT DEFAULT '',
-                        importance INTEGER DEFAULT 3,
-                        source TEXT DEFAULT '',
-                        status TEXT DEFAULT 'active',
-                        created_at TEXT DEFAULT (datetime('now')),
-                        updated_at TEXT DEFAULT (datetime('now')),
-                        last_used_at TEXT DEFAULT (datetime('now'))
-                    );
-                    CREATE TABLE IF NOT EXISTS characters (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        novel_id INTEGER NOT NULL REFERENCES novels(id),
-                        name TEXT NOT NULL,
-                        alias TEXT DEFAULT '',
-                        identity TEXT DEFAULT '',
-                        appearance TEXT DEFAULT '',
-                        personality TEXT DEFAULT '',
-                        archetype TEXT DEFAULT '',
-                        voice TEXT DEFAULT '',
-                        behavior TEXT DEFAULT '',
-                        character_psychology TEXT DEFAULT '',
-                        backstory TEXT DEFAULT '',
-                        motivation TEXT DEFAULT '',
-                        role TEXT DEFAULT 'supporting',
-                        faction TEXT DEFAULT '',
-                        power_level TEXT DEFAULT '',
-                    tags TEXT DEFAULT '',
-                        description TEXT DEFAULT '',
-                        attributes TEXT DEFAULT '{}',
-                        relationships TEXT DEFAULT '[]',
-                        status TEXT DEFAULT 'active',
-                        created_at TEXT DEFAULT (datetime('now')),
-                        updated_at TEXT DEFAULT (datetime('now')),
-                        UNIQUE(novel_id, name)
-                    );
-                    CREATE TABLE IF NOT EXISTS plot_threads (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        novel_id INTEGER NOT NULL REFERENCES novels(id),
-                        title TEXT NOT NULL,
-                        thread_type TEXT DEFAULT 'main',
-                        status TEXT DEFAULT 'active',
-                        priority INTEGER DEFAULT 0,
-                        description TEXT DEFAULT '',
-                        related_chapters TEXT DEFAULT '[]',
-                        related_arcs TEXT DEFAULT '[]',
-                        foreshadowing TEXT DEFAULT '',
-                        expected_resolution TEXT DEFAULT '',
-                        created_at TEXT DEFAULT (datetime('now')),
-                        UNIQUE(novel_id, title)
-                    );
-                    CREATE TABLE IF NOT EXISTS worldbuilding (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        novel_id INTEGER NOT NULL REFERENCES novels(id),
-                        title TEXT NOT NULL,
-                        category TEXT DEFAULT '',
-                        content TEXT DEFAULT '',
-                        tags TEXT DEFAULT '',
-                        created_at TEXT DEFAULT (datetime('now')),
-                        updated_at TEXT DEFAULT (datetime('now')),
-                        UNIQUE(novel_id, title)
-                    );
-                    CREATE TABLE IF NOT EXISTS reader_promises (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        novel_id INTEGER NOT NULL REFERENCES novels(id),
-                        title TEXT NOT NULL,
-                        description TEXT DEFAULT '',
-                        status TEXT DEFAULT 'pending',
-                        priority INTEGER DEFAULT 0,
-                        expected_chapter INTEGER DEFAULT 0,
-                        fulfilled_chapter INTEGER DEFAULT 0,
-                        created_at TEXT DEFAULT (datetime('now')),
-                        UNIQUE(novel_id, title)
-                    );
-                    CREATE TABLE IF NOT EXISTS writing_rules (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        novel_id INTEGER NOT NULL REFERENCES novels(id),
-                        rule TEXT NOT NULL,
-                        category TEXT DEFAULT '',
-                        source TEXT DEFAULT '',
-                        active INTEGER DEFAULT 1,
-                        created_at TEXT DEFAULT (datetime('now')),
-                        UNIQUE(novel_id, rule)
-                    );
-                    -- FTS5 tables
-                    CREATE VIRTUAL TABLE IF NOT EXISTS novel_chapter_fts USING fts5(
-                        title, content, summary, content='chapters', content_rowid='id'
-                    );
-                    CREATE VIRTUAL TABLE IF NOT EXISTS novel_chunk_fts USING fts5(
-                        content, content='chapter_chunks', content_rowid='id'
-                    );
-                    CREATE VIRTUAL TABLE IF NOT EXISTS novel_character_fts USING fts5(
-                        name, alias, identity, personality, tags, content='characters', content_rowid='id'
-                    );
-                    CREATE VIRTUAL TABLE IF NOT EXISTS novel_world_fts USING fts5(
-                        title, content, tags, content='worldbuilding', content_rowid='id'
-                    );
-                    CREATE VIRTUAL TABLE IF NOT EXISTS novel_plot_fts USING fts5(
-                        title, content, content='plot_threads', content_rowid='id'
-                    );
-                """)
-                conn.commit()
-            finally:
-                conn.close()
-
-        return slot_dir
-
-    def _register_slot(self, slot_id: str, name: str = "", description: str = "") -> Dict:
-        """在 registry.json 中注册新 slot 并返回更新后的 registry"""
-        reg = self._get_registry()
-        new_slot = {
-            "id": slot_id,
-            "name": name or slot_id,
-            "description": description,
-            "status": "active",
-            "created_at": datetime.now().isoformat(),
-            "project_count": 1,
-        }
-        # 检查是否已存在
-        slots = reg.get("slots", [])
-        existing = [s for s in slots if s.get("id") == slot_id]
-        if not existing:
-            slots.append(new_slot)
-        else:
-            existing[0].update(new_slot)
-        reg["slots"] = slots
-        self._save_registry(reg)
-        return reg
+    # v0.9.0: 影子 slot 创建系统已移除。slot 命名统一由
+    # src/db/slot_manager.py:ensure_slot_for_outline 负责（按大纲 title 派生 slug）。
 
     def undo_last_add(self) -> Dict:
         """v0.6.5-clean7: 撤销最近一次 outline add，恢复之前的状态."""
@@ -880,125 +625,6 @@ class OutlineManager:
             "message": f"已撤销到: {prev_data.get('title', prev_id)}",
             "removed": oid,
             "active": prev_id,
-        }
-
-    def _switch_active_slot(self, slot_id: str) -> str:
-        """切换活跃 slot，返回旧的活跃 slot"""
-        reg = self._get_registry()
-        old = reg.get("active_slot", "")
-        reg["active_slot"] = slot_id
-        self._save_registry(reg)
-        return old
-
-    def add_outline_to_new_slot(self, content: str, title: str = "",
-                                 genre: str = "", style: str = "",
-                                 tags: list = None,
-                                 similarity_result: Dict = None) -> Dict:
-        """P0-6: 为新小说创建独立 slot 并导入大纲"""
-        # 0. 如果没传标题，从内容提取
-        if not title:
-            for line in content.strip().split("\n"):
-                raw = line.strip()
-                if not raw: continue
-                import re as _re
-                m = _re.search(r'[《「](.+?)[》」]', raw)
-                if m:
-                    title = m.group(1)[:40]
-                    break
-            if not title:
-                for line in content.strip().split("\n"):
-                    raw = line.strip()
-                    if not raw: continue
-                    m = _re.match(r'^(?:标题[：:]|书名[：:]|小说名[：:]|作品名[：:])\s*(.+)', raw)
-                    if m:
-                        title = m.group(1).strip()[:40]
-                        break
-            if not title:
-                for line in content.strip().split("\n"):
-                    raw = line.strip()
-                    if raw.startswith("# "):
-                        t = raw[2:].strip()
-                        # strip 《》if present
-                        m2 = _re.search(r'[《「](.+?)[》」]', t)
-                        title = (m2.group(1) if m2 else t)[:40]
-                        break
-        # 1. 寻找空闲 slot 或创建新的
-        idle = self._find_idle_slot()
-        if idle:
-            slot_id = idle
-            created_new = False
-        else:
-            slot_id = self._get_next_slot_id()
-            created_new = True
-
-        # 2. 创建 slot 结构
-        slot_name = title or "未命名项目"
-        slot_dir = self._create_slot_structure(slot_id, slot_name)
-        self._register_slot(slot_id, slot_name, f"自动创建于相似度检测（低相似度）")
-
-        # v0.6.5-clean6: 向 slot 的 novel.db 插入 novel 记录
-        slug = self._title_to_slug(title) if title else slot_id
-        db_path = slot_dir / "novel.db"
-        if db_path.exists():
-            import sqlite3 as _sql
-            _conn = _sql.connect(str(db_path))
-            try:
-                _conn.execute(
-                    "INSERT OR IGNORE INTO novels(slug, title, status) VALUES(?,?,?)",
-                    (slug, title, "planning")
-                )
-                _conn.commit()
-            finally:
-                _conn.close()
-
-        # 3. 导入大纲到新 slot
-        outline_id = self._generate_outline_id(title)
-        chapter_count = 0
-        for line in content.split("\n"):
-            if "第" in line and "章" in line:
-                chapter_count += 1
-
-        data = {
-            "id": outline_id,
-            "title": title,
-            "content": content,
-            "tags": tags or [],
-            "genre": genre,
-            "style": style,
-            "chapter_count": chapter_count,
-            "volume_count": 1,
-            "versions_count": 0,
-            "outline_versions": [],
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
-            "source": "add",
-        }
-        if similarity_result:
-            data["similarity_check"] = similarity_result
-
-        self._write_outline_file(outline_id, data, slot_id)
-
-        # 设为激活大纲
-        proj = self._get_project_json(slot_id)
-        proj["active_outline"] = outline_id
-        proj["updated_at"] = datetime.now().isoformat()
-        self._save_project_json(proj, slot_id)
-
-        # 4. 切换到新 slot
-        old_slot = self._switch_active_slot(slot_id)
-
-        # 自动提取角色关系
-        self._auto_extract_relations(content, slot_id)
-
-        return {
-            "status": "ok",
-            "slot_id": slot_id,
-            "slot_created": created_new,
-            "old_slot": old_slot,
-            "outline_id": outline_id,
-            "title": title,
-            "chapter_count": chapter_count,
-            "similarity": similarity_result,
         }
 
     def add_outline_as_version(self, content: str, title: str = "",

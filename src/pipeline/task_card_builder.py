@@ -17,6 +17,7 @@ from pathlib import Path
 
 from version import get_version
 from src.utils.config_utils import load_json_config, resolve_path
+from src.db._conn import connect_sqlite
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -161,7 +162,7 @@ def get_character_relations() -> list[dict]:
         return []
 
     try:
-        with closing(sqlite3.connect(str(db_path))) as conn:
+        with closing(connect_sqlite(db_path)) as conn:
             rows = conn.execute(
                 "SELECT char_a, char_b, relation_type FROM character_relationships"
             ).fetchall()
@@ -195,7 +196,7 @@ def build_task_card(
     if not db_path.exists():
         return f"# Task Card - Chapter {chapter_no}\n\n> [WARN] Database not found: {db_path}\n"
 
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(connect_sqlite(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         novel_id = get_novel_id(conn, slug)
         if not novel_id:

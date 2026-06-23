@@ -14,6 +14,7 @@ from typing import Optional, Dict, List
 
 from src.db.init_db import find_migrations, find_schema, init_db
 from src.db.registry import Registry
+from src.db._conn import connect_sqlite
 
 
 # Standard slot subdirectory structure
@@ -44,315 +45,22 @@ class SlotManager:
     def _init_slot_db(self, slot_dir: Path) -> None:
         """Create and initialize a novel.db inside a slot directory with core tables.
 
-        优先加载仓库级单一权威 schema 文件 database/schema.sql；找不到时回退到
-        下面的内嵌 SQL 作兜底（保留健壮性）。两者内容保持一致。
+        唯一权威来源是 database/schema.sql（含 migrations 回放）；该文件缺失时直接
+        抛错，不再静默用内嵌 SQL 建一个缺迁移的库。
         """
         db_path = slot_dir / "novel.db"
         schema = find_schema(self.project_root)
         migrations = find_migrations(self.project_root)
         if schema is not None and init_db(db_path, schema, migrations):
             return
-        conn = sqlite3.connect(str(db_path))
+        schema_file = self.project_root / "database" / "schema.sql"
+        if not schema_file.exists():
+            raise FileNotFoundError(
+                f"database/schema.sql 缺失，无法初始化 slot DB: {schema_file}"
+            )
+        conn = connect_sqlite(db_path)
         try:
-            embedded_sql = """
-                CREATE TABLE IF NOT EXISTS novels (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    slug TEXT UNIQUE NOT NULL,
-                    title TEXT NOT NULL,
-                    genre TEXT DEFAULT '',
-                    theme TEXT DEFAULT '',
-                    description TEXT DEFAULT '',
-                    target_words INTEGER DEFAULT 0,
-                    current_words INTEGER DEFAULT 0,
-                    status TEXT DEFAULT 'planning',
-                    created_at TEXT DEFAULT (datetime('now')),
-                    updated_at TEXT DEFAULT (datetime('now'))
-                );
-
-                CREATE TABLE IF NOT EXISTS memories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    type TEXT DEFAULT 'note',
-                    project TEXT DEFAULT '',
-                    title TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    tags TEXT DEFAULT '',
-                    importance INTEGER DEFAULT 3,
-                    source TEXT DEFAULT '',
-                    status TEXT DEFAULT 'active',
-                    created_at TEXT DEFAULT (datetime('now')),
-                    updated_at TEXT DEFAULT (datetime('now')),
-                    last_used_at TEXT DEFAULT (datetime('now'))
-                );
-
-                CREATE TABLE IF NOT EXISTS volumes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    volume_no INTEGER NOT NULL,
-                    title TEXT DEFAULT '',
-                    summary TEXT DEFAULT '',
-                    target_words INTEGER DEFAULT 0,
-                    UNIQUE(novel_id, volume_no)
-                );
-
-                CREATE TABLE IF NOT EXISTS chapters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    volume_id INTEGER REFERENCES volumes(id),
-                    chapter_no INTEGER NOT NULL,
-                    title TEXT DEFAULT '',
-                    content TEXT DEFAULT '',
-                    summary TEXT DEFAULT '',
-                    word_count INTEGER DEFAULT 0,
-                    status TEXT DEFAULT 'draft',
-                    file_path TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now')),
-                    updated_at TEXT DEFAULT (datetime('now')),
-                    UNIQUE(novel_id, chapter_no)
-                );
-
-                CREATE TABLE IF NOT EXISTS chapter_chunks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    chapter_id INTEGER NOT NULL REFERENCES chapters(id),
-                    chunk_no INTEGER NOT NULL,
-                    content TEXT NOT NULL,
-                    word_count INTEGER DEFAULT 0,
-                    created_at TEXT DEFAULT (datetime('now'))
-                );
-
-                CREATE TABLE IF NOT EXISTS characters (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    name TEXT NOT NULL,
-                    alias TEXT DEFAULT '',
-                    role TEXT DEFAULT '',
-                    identity TEXT DEFAULT '',
-                    personality TEXT DEFAULT '',
-                    motivation TEXT DEFAULT '',
-                    ability TEXT DEFAULT '',
-                    relationship TEXT DEFAULT '',
-                    arc TEXT DEFAULT '',
-                    status TEXT DEFAULT 'active',
-                    focus_state TEXT DEFAULT '活跃',
-                    tags TEXT DEFAULT ''
-                );
-
-                CREATE TABLE IF NOT EXISTS worldbuilding (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    category TEXT DEFAULT '',
-                    title TEXT NOT NULL,
-                    content TEXT DEFAULT '',
-                    importance INTEGER DEFAULT 3,
-                    tags TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now')),
-                    updated_at TEXT DEFAULT (datetime('now'))
-                );
-
-                CREATE TABLE IF NOT EXISTS plot_threads (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    title TEXT NOT NULL,
-                    content TEXT DEFAULT '',
-                    thread_type TEXT DEFAULT '伏笔',
-                    introduced_chapter INTEGER,
-                    resolved_chapter INTEGER,
-                    status TEXT DEFAULT 'open',
-                    importance INTEGER DEFAULT 3
-                );
-
-                CREATE TABLE IF NOT EXISTS writing_rules (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    title TEXT NOT NULL,
-                    content TEXT DEFAULT '',
-                    rule_type TEXT DEFAULT 'other',
-                    importance INTEGER DEFAULT 3,
-                    status TEXT DEFAULT 'active'
-                );
-
-                CREATE TABLE IF NOT EXISTS chapter_summaries (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    chapter_id INTEGER NOT NULL REFERENCES chapters(id),
-                    short_summary TEXT DEFAULT '',
-                    long_summary TEXT DEFAULT '',
-                    key_events TEXT DEFAULT '',
-                    characters_involved TEXT DEFAULT '',
-                    new_settings TEXT DEFAULT '',
-                    foreshadowing TEXT DEFAULT '',
-                    continuity_notes TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now')),
-                    updated_at TEXT DEFAULT (datetime('now')),
-                    UNIQUE(novel_id, chapter_id)
-                );
-
-                CREATE TABLE IF NOT EXISTS continuity_checks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    chapter_id INTEGER NOT NULL REFERENCES chapters(id),
-                    check_type TEXT DEFAULT 'continuity',
-                    issue TEXT DEFAULT '',
-                    suggestion TEXT DEFAULT '',
-                    severity INTEGER DEFAULT 1,
-                    status TEXT DEFAULT 'open',
-                    created_at TEXT DEFAULT (datetime('now'))
-                );
-
-                CREATE TABLE IF NOT EXISTS novel_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    action TEXT NOT NULL,
-                    target_type TEXT,
-                    target_id INTEGER,
-                    detail TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now'))
-                );
-
-                CREATE TABLE IF NOT EXISTS chapter_versions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    chapter_id INTEGER,
-                    chapter_no INTEGER NOT NULL,
-                    version_no INTEGER NOT NULL DEFAULT 1,
-                    version_status TEXT DEFAULT 'draft',
-                    title TEXT DEFAULT '',
-                    content TEXT NOT NULL,
-                    word_count INTEGER DEFAULT 0,
-                    change_reason TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now'))
-                );
-
-                CREATE TABLE IF NOT EXISTS reader_promises (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    promise_title TEXT NOT NULL,
-                    promise_detail TEXT NOT NULL,
-                    introduced_chapter INTEGER,
-                    expected_payoff_range TEXT DEFAULT '',
-                    payoff_chapter INTEGER,
-                    status TEXT DEFAULT 'open',
-                    importance INTEGER DEFAULT 3,
-                    reader_emotion TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now')),
-                    updated_at TEXT DEFAULT (datetime('now'))
-                );
-
-                CREATE TABLE IF NOT EXISTS volume_plans (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    volume_no INTEGER NOT NULL,
-                    planned_title TEXT DEFAULT '',
-                    final_title TEXT DEFAULT '',
-                    title_status TEXT DEFAULT 'planned',
-                    suggested_chapters INTEGER DEFAULT 25,
-                    min_chapters INTEGER DEFAULT 20,
-                    max_chapters INTEGER DEFAULT 29,
-                    volume_goal TEXT DEFAULT '',
-                    opening_state TEXT DEFAULT '',
-                    ending_target TEXT DEFAULT '',
-                    must_complete TEXT DEFAULT '',
-                    unresolved_hooks_to_next TEXT DEFAULT '',
-                    outline_version INTEGER DEFAULT 1,
-                    created_at TEXT DEFAULT (datetime('now')),
-                    updated_at TEXT DEFAULT (datetime('now')),
-                    UNIQUE(novel_id, volume_no)
-                );
-
-                CREATE TABLE IF NOT EXISTS chapter_plans (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    volume_no INTEGER NOT NULL,
-                    chapter_no INTEGER NOT NULL,
-                    planned_title TEXT DEFAULT '',
-                    final_title TEXT DEFAULT '',
-                    title_status TEXT DEFAULT 'planned',
-                    plan_status TEXT DEFAULT 'planned',
-                    chapter_goal TEXT DEFAULT '',
-                    main_event TEXT DEFAULT '',
-                    character_focus TEXT DEFAULT '',
-                    conflict_point TEXT DEFAULT '',
-                    must_include TEXT DEFAULT '',
-                    plot_threads_to_advance TEXT DEFAULT '',
-                    reader_promises_to_advance TEXT DEFAULT '',
-                    ending_hook_direction TEXT DEFAULT '',
-                    continuity_from_previous TEXT DEFAULT '',
-                    title_change_reason TEXT DEFAULT '',
-                    actual_word_count INTEGER DEFAULT 0,
-                    actual_summary TEXT DEFAULT '',
-                    completion_status TEXT DEFAULT '',
-                    ingested_at TEXT DEFAULT '',
-                    outline_version INTEGER DEFAULT 1,
-                    created_at TEXT DEFAULT (datetime('now')),
-                    updated_at TEXT DEFAULT (datetime('now')),
-                    UNIQUE(novel_id, volume_no, chapter_no)
-                );
-
-                CREATE TABLE IF NOT EXISTS title_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    volume_no INTEGER,
-                    chapter_no INTEGER,
-                    old_title TEXT DEFAULT '',
-                    new_title TEXT DEFAULT '',
-                    title_type TEXT DEFAULT 'chapter',
-                    change_reason TEXT DEFAULT '',
-                    changed_at TEXT DEFAULT (datetime('now'))
-                );
-
-                CREATE TABLE IF NOT EXISTS chapter_contexts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    novel_id INTEGER NOT NULL REFERENCES novels(id),
-                    chapter_id INTEGER NOT NULL REFERENCES chapters(id),
-                    chapter_no INTEGER NOT NULL,
-                    character_locations TEXT DEFAULT '{}',
-                    active_items TEXT DEFAULT '[]',
-                    unresolved_threads TEXT DEFAULT '[]',
-                    emotional_states TEXT DEFAULT '{}',
-                    world_state TEXT DEFAULT '',
-                    ending_state TEXT DEFAULT '',
-                    hooks_for_next TEXT DEFAULT '',
-                    raw_summary TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now')),
-                    UNIQUE(novel_id, chapter_id)
-                );
-
-                -- FTS5 全文检索索引 (v0.6.5-clean3)
-                CREATE VIRTUAL TABLE IF NOT EXISTS novel_chapter_fts USING fts5(
-                    title, content, summary,
-                    content='chapters', content_rowid='id'
-                );
-
-                CREATE VIRTUAL TABLE IF NOT EXISTS novel_chunk_fts USING fts5(
-                    content,
-                    content='chapter_chunks', content_rowid='id'
-                );
-
-                CREATE VIRTUAL TABLE IF NOT EXISTS novel_character_fts USING fts5(
-                    name, alias, identity, personality, tags,
-                    content='characters', content_rowid='id'
-                );
-
-                CREATE VIRTUAL TABLE IF NOT EXISTS novel_world_fts USING fts5(
-                    title, content, tags,
-                    content='worldbuilding', content_rowid='id'
-                );
-
-                CREATE VIRTUAL TABLE IF NOT EXISTS novel_plot_fts USING fts5(
-                    title, content,
-                    content='plot_threads', content_rowid='id'
-                );
-
-                CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-                    title, content, tags,
-                    content='memories', content_rowid='id'
-                );
-            """
-            schema_file = self.project_root / "database" / "schema.sql"
-            if schema_file.exists():
-                schema_sql = schema_file.read_text(encoding="utf-8")
-            else:
-                schema_sql = embedded_sql
-            conn.executescript(schema_sql)
+            conn.executescript(schema_file.read_text(encoding="utf-8"))
             conn.commit()
         finally:
             conn.close()
@@ -363,7 +71,7 @@ class SlotManager:
         db_path = self.get_slot_db_path(slot_id)
         if not db_path.exists():
             return False
-        conn = sqlite3.connect(str(db_path))
+        conn = connect_sqlite(db_path)
         try:
             conn.executescript("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS novel_chapter_fts USING fts5(
@@ -406,8 +114,9 @@ class SlotManager:
 
     def init_workspace(self, force: bool = False) -> Dict:
         """
-        Initialize the workspace with registry and 3 default slots.
-        Returns a status dict.
+        Initialize the workspace: 仅创建 workspace/ 目录和空的 registry.json。
+        不预创建任何 slot——第一次 `outline add` 会按大纲 title 派生 slug
+        自动创建同名 slot（见 SlotManager.ensure_slot_for_outline）。
         """
         result = {"status": "ok", "created": [], "message": ""}
 
@@ -418,55 +127,16 @@ class SlotManager:
 
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize registry
         registry_data = {
             "version": "1.0",
             "created_at": datetime.now().isoformat(),
-            "active_slot": "slot_001",
-            "slots": [
-                {
-                    "id": "slot_001",
-                    "name": "默认工作区",
-                    "description": "默认项目工作区",
-                    "status": "active",
-                    "created_at": datetime.now().isoformat(),
-                    "project_count": 0,
-                }
-            ],
+            "active_slot": "",
+            "slots": [],
         }
         self.registry.save(registry_data)
         result["created"].append("registry.json")
 
-        # Create 3 initial slots (all 3 get directories + novel.db, none auto-register)
-        for i in range(1, 4):
-            slot_id = f"slot_{i:03d}"
-            self.create_slot(slot_id, ensure_registry=False)
-            result["created"].append(slot_id)
-
-        # P0-5: Register all 3 slots in registry.
-        # slot_001 is already in the initial registry JSON above (status=active).
-        # slot_002 and slot_003 need explicit registration as normal/idle slots.
-        self.registry.add_slot(
-            slot_id="slot_002",
-            name="空闲工作区 2",
-            description="空闲工作区",
-            status="normal",
-            project_count=0,
-        )
-        self.registry.add_slot(
-            slot_id="slot_003",
-            name="空闲工作区 3",
-            description="空闲工作区",
-            status="normal",
-            project_count=0,
-        )
-
-        # P0-1 clean3: Migrate all slot DBs to include FTS5 tables
-        for i in range(1, 4):
-            slot_id = f"slot_{i:03d}"
-            self.migrate_slot_fts(slot_id)
-
-        result["message"] = f"workspace 初始化完成，创建了 {len(result['created'])-1} 个 slot"
+        result["message"] = "workspace 初始化完成。请运行 nf_project outline add 导入大纲，将自动创建同名 slot"
         return result
 
     def init(self, force: bool = False) -> Dict:
@@ -522,29 +192,77 @@ class SlotManager:
 
     def create_slot_auto(self, name: str, description: str = "") -> Dict:
         """
-        Auto-create a new slot with auto-generated ID.
-        Auto-creates slot_004 when 3 slots exist but slot_004 is missing.
+        Auto-create a new slot with auto-generated ID (timestamp-based fallback).
+        新代码应优先用 ensure_slot_for_outline(title) 按大纲名命名。
         """
-        slots = self.registry.list_slots()
-        slot_count = len(slots)
-
-        # Auto-create slot_004 if needed (when 3 full slots exist)
-        if slot_count >= 3:
-            existing_ids = {s.get("id") for s in slots}
-            # Ensure slots 1-3 exist if count >= 3
-            for i in range(1, 4):
-                sid = f"slot_{i:03d}"
-                if sid not in existing_ids and not self.slot_exists(sid):
-                    self.create_slot(sid)
-
         slot_id = self.registry.get_next_slot_id()
         return self.create_slot(slot_id, ensure_registry=True,
                                 name=name, description=description)
 
+    @staticmethod
+    def _title_to_slug(title: str) -> str:
+        """委托 src.utils.slug.title_to_slug（全仓库唯一来源）。"""
+        from src.utils.slug import title_to_slug
+        return title_to_slug(title)
+
+    def _slot_matches_title(self, slot_id: str, title: str) -> bool:
+        """目标 slot 的 novel.db 是否已经存有该 title 的小说（用于判断能否复用）。"""
+        db_path = self.get_slot_db_path(slot_id)
+        if not db_path.exists():
+            return True
+        try:
+            conn = connect_sqlite(db_path)
+            try:
+                cur = conn.execute("SELECT title FROM novels LIMIT 1")
+                row = cur.fetchone()
+                if row is None:
+                    return True
+                return row[0] == title
+            finally:
+                conn.close()
+        except Exception:
+            return False
+
+    def ensure_slot_for_outline(self, title: str) -> str:
+        """
+        根据大纲 title 派生 slug，确保对应 slot 存在并设为 active slot。
+        - 若同名 slot 不存在 → 创建。
+        - 若同名 slot 已存在且其 novel.db 中 title 一致 → 复用。
+        - 若同名 slot 已存在但 title 不同 → 加 _2 / _3 后缀直到不冲突。
+        - title 为空或仅由特殊字符组成（slug 退化为 "novel"）时 →
+          强制时间戳后缀，永不复用，避免不同空 title 的大纲互相覆盖。
+        返回最终使用的 slot_id。
+        """
+        normalized_title = (title or "").strip()
+        base = self._title_to_slug(title)
+
+        # 空 title / 退化 slug：不复用，强制独立目录
+        if not normalized_title or base == "novel":
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            candidate = f"novel_{ts}"
+            self.create_slot(candidate, ensure_registry=True,
+                             name=normalized_title or candidate,
+                             description=normalized_title or candidate)
+            self.registry.set_active_slot(candidate)
+            return candidate
+
+        existing_ids = {s.get("id") for s in self.registry.list_slots()}
+        candidate = base
+        n = 2
+        while candidate in existing_ids and not self._slot_matches_title(candidate, title):
+            candidate = f"{base}_{n}"
+            n += 1
+
+        if not self.slot_exists(candidate) or candidate not in existing_ids:
+            self.create_slot(candidate, ensure_registry=True, name=title or candidate,
+                             description=title or candidate)
+        self.registry.set_active_slot(candidate)
+        return candidate
+
     def delete_slot(self, slot_id: str) -> Dict:
         """
         Delete a slot (directory + registry entry).
-        Protected: won't delete slot_001 or the active slot.
+        Protected: won't delete the active slot.
         """
         result = {"status": "ok", "message": ""}
 
@@ -552,11 +270,6 @@ class SlotManager:
         if slot_id == active:
             result["status"] = "error"
             result["message"] = f"不能删除当前活跃的 slot ({slot_id})"
-            return result
-
-        if slot_id == "slot_001":
-            result["status"] = "error"
-            result["message"] = "slot_001 是默认工作区，不能删除"
             return result
 
         # Remove from registry
@@ -584,8 +297,7 @@ class SlotManager:
     def delete_slot_safe(self, slot_id: str, confirm: bool = False) -> Dict:
         """
         Safe delete: move slot to workspace/_trash/ instead of permanently deleting.
-        Protected: won't delete slot_001 or the active slot.
-        Requires explicit confirm=True.
+        Protected: won't delete the active slot. Requires explicit confirm=True.
 
         The slot is moved to workspace/_trash/<timestamp>_<slot_id>/
         """
@@ -600,11 +312,6 @@ class SlotManager:
         if slot_id == active:
             result["status"] = "error"
             result["message"] = f"不能删除当前活跃的 slot ({slot_id})"
-            return result
-
-        if slot_id == "slot_001":
-            result["status"] = "error"
-            result["message"] = "slot_001 是默认工作区，不能删除"
             return result
 
         slot_dir = self.get_slot_dir(slot_id)

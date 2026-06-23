@@ -17,7 +17,9 @@ from src.pipeline._base import (
     load_config,
 )
 from src.pipeline.ingest import ingest, stage_review
+from src.pipeline._mental_triggers import load_mental_triggers
 from src.runtime import build_guard_context
+from src.db._conn import connect_sqlite
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 app = None
@@ -38,11 +40,11 @@ def word_count_gate(content, chapter_no, chapter_type="normal", genre=None, app_
     if app_inst is None:
         raise RuntimeError("word_count_gate requires app_inst/context")
     rules = app_inst.wc_rules.get(chapter_type, app_inst.wc_default).copy()
-    # v0.7.1: 题材感知 — 优先用 genre preset 的 min_words 覆盖 config.json 的硬编码
+    # 题材感知：优先用 genre preset 的 min_words 覆盖 config.json 的硬编码
     if genre:
         try:
             import yaml
-            _preset_path = Path("configs") / "human_texture" / "genre_presets.yaml"
+            _preset_path = _PROJECT_ROOT.parent / "configs" / "human_texture" / "genre_presets.yaml"
             if _preset_path.exists():
                 all_presets = yaml.safe_load(_preset_path.read_text(encoding="utf-8"))
                 genre_preset = all_presets.get(genre, all_presets.get("default", {}))
@@ -183,34 +185,33 @@ def run_post(
     with open(candidates, 'r', encoding='utf-8') as f:
         content = _strip_selfcheck(f.read())
 
-# ── 1.2 裂隙触发词检测 ──
-    _fissure_triggers = ["水", "冷水", "刹车声", "玻璃碎裂",
-                        "强光", "血味", "安全带", "束缚感"]
-    _trigger_hits = 0
-    _trigger_detail = {}
-    for _tw in _fissure_triggers:
-        _cnt = content.count(_tw)
-        if _cnt > 0:
-            _trigger_hits += _cnt
-            _trigger_detail[_tw] = _cnt
-    if _trigger_hits > 0:
-        print(f"\n  [林观澜裂隙触发] 命中{_trigger_hits}次: {_trigger_detail}")
-        state["裂隙触发词命中"] = _trigger_hits
-        state["裂隙触发词详情"] = _trigger_detail
-        write_json_atomic(state_path, state)
-        if _trigger_hits <= 2:
-            print(f"  ℹ️ 命中0-2次，不提示")
-        elif _trigger_hits <= 3:
-            print(f"  ⚠️ 裂隙触发词出现{_trigger_hits}次")
-        else:
-            print(f"  \U0001f534 裂隙加重，建议写一段解离戏")
+# ── 1.2 精神状态触发词检测（仅当 slot 配置了 mental_triggers.json）──
+    _mt_cfg = load_mental_triggers(app)
+    if _mt_cfg:
+        _mt_label = _mt_cfg["label"]
+        _trigger_hits = 0
+        _trigger_detail = {}
+        for _tw in _mt_cfg["triggers"]:
+            _cnt = content.count(_tw)
+            if _cnt > 0:
+                _trigger_hits += _cnt
+                _trigger_detail[_tw] = _cnt
+        if _trigger_hits >= _mt_cfg["state_threshold"]:
+            print(f"\n  [{_mt_label}] 命中{_trigger_hits}次: {_trigger_detail}")
+            state["mental_trigger_hits"] = _trigger_hits
+            state["mental_trigger_detail"] = _trigger_detail
+            write_json_atomic(state_path, state)
+            if _trigger_hits >= _mt_cfg["advise_threshold"]:
+                print(f"  \U0001f534 {_mt_label}加重，建议写一段解压/解离戏")
+            else:
+                print(f"  ⚠️ {_mt_label}出现{_trigger_hits}次")
 
 # STEP 4: word_count
     _pipeline_genre = state.get("genre", "") if state else ""
 # v0.7.1 fix: fallback to novels table if pipeline_state lacks genre (e.g. pre ran before genre was set)
     if not _pipeline_genre:
         try:
-            conn3 = sqlite3.connect(str(app.db_path))
+            conn3 = connect_sqlite(app.db_path)
             cur3 = conn3.cursor()
             row3 = cur3.execute("SELECT genre FROM novels WHERE slug=?", (app.novel_slug,)).fetchone()
             if row3 and row3[0]:
@@ -299,43 +300,38 @@ def run_post(
                 voice_context=voice_context,
             )
             print(f"  [VOICE] {voice_context['source']}: {len(voice_context['profiles'])} profiles, {len(voice_context['packs'])} packs")
-    except Exception:
-        pass
+    except Exception as _e:
+        from src.utils.error_handling import log_optional_failure
+        log_optional_failure("post: voice_context 加载", _e)
 
-    orch_report = None
+    # 空安全兜底：orchestrator 失败时下游 human_texture/dedup 仍可安全引用
+    orch_report = {"warnings": [], "executed_guards": [], "warning_count": 0}
     try:
-        from src.pipeline.guard_orchestrator import run_orchestrated
-        orch_report = run_orchestrated(
-            content, chapter_no, mode=orchestrator_mode,
-            config=cfg, reports_dir=str(ce_reports_dir),
-            prev_tail=prev_tail_text, prev_brief=prev_brief,
-            extra_context=extra_context)
-        orch_path = ce_reports_dir / f"chapter_{chapter_no:03d}_orchestrator_report.json"
-        orch_path.write_text(json.dumps(orch_report, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"  [OK] orchestrator ({orchestrator_mode}): {len(orch_report['executed_guards'])} guards, {orch_report['warning_count']} warnings")
-        if orch_report.get("blocked_by"):
-            print(f"  [BLOCK] compliance: {orch_report['blocked_by']}")
-        if orch_report.get("fail_count", 0) > 0:
-            failed = orch_report.get("failed_guards", orch_report.get("executed_guards", []))
-            print(f"  [WARN] {orch_report['fail_count']} guard(s) FAIL (level 1/2) — ingest 继续但需复查")
-
-    # ── STEP 7.7: Punctuation Guard ──
+        # run_orchestrated 单独 try——它失败不再级联跳过 human_texture/dedup
         try:
-            from src.guards.punctuation_guard import run_punctuation_check
-            punct = run_punctuation_check(content, chapter_no)
-            punct_status = punct["status"]
-            dash_pairs = punct["stats"]["dash_pairs"]
-            dash_per_kw = dash_pairs * 1000 / max(punct["stats"]["word_count"], 1)
-            if punct_status == "FAIL":
-                print(f"  ⚠️ 标点节奏: FAIL ({dash_pairs}组破折号, {dash_per_kw:.1f}/千字)")
-            elif punct_status == "WARNING":
-                print(f"  ⚠️ 标点节奏: WARN ({dash_pairs}组破折号, {dash_per_kw:.1f}/千字)")
-            else:
-                print(f"  ✅ 标点节奏: PASS ({dash_pairs}组破折号)")
+            from src.pipeline.guard_orchestrator import run_orchestrated
+            orch_report = run_orchestrated(
+                content, chapter_no, mode=orchestrator_mode,
+                config=cfg, reports_dir=str(ce_reports_dir),
+                prev_tail=prev_tail_text, prev_brief=prev_brief,
+                extra_context=extra_context)
+            orch_path = ce_reports_dir / f"chapter_{chapter_no:03d}_orchestrator_report.json"
+            orch_path.write_text(json.dumps(orch_report, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"  [OK] orchestrator ({orchestrator_mode}): {len(orch_report.get('executed_guards', []))} guards, {orch_report.get('warning_count', 0)} warnings")
+            if orch_report.get("blocked_by"):
+                print(f"  [BLOCK] compliance: {orch_report['blocked_by']}")
+            if orch_report.get("fail_count", 0) > 0:
+                failed = orch_report.get("failed_guards", orch_report.get("executed_guards", []))
+                print(f"  [WARN] {orch_report['fail_count']} guard(s) FAIL (level 1/2) — ingest 继续但需复查")
         except Exception as e:
-            print(f"  [INFO] punctuation guard skipped: {e}")
+            print(f"  [FAIL] orchestrator: {e} — 跳过门禁但 human_texture/dedup/ingest 继续")
+            orch_report = {"warnings": [], "executed_guards": [], "warning_count": 0}
 
-    # ── STEP 7.8: Human Texture Quality Layer (人工味质量层) ──
+    # ── STEP 7.7: Human Texture Quality Layer (人工味质量层) ──
+    # NOTE: punctuation_guard 由 narrative_rhythm_guard (L2 aggregator) 在
+    # run_orchestrated 中统一执行，findings 已经在 orch_report 里——
+    # 这里不再单独跑一遍打印。human_texture 仍走独立路径，因为它的
+    # chapter_{N:03d}_texture_report.json 被 pre.py 和下章 trend 消费。
         try:
             from src.guards.human_texture import run_human_texture_guards
         # Phase 4: 优先 pipeline_state 中的 genre（由 pre 从 DB 读取）
@@ -423,7 +419,8 @@ def run_post(
         except Exception as e:
             print(f"  [WARN] dedup skipped: {e}")
     except Exception as e:
-        print(f"  [WARN] orchestrator failed: {e}")
+        # 安全网：human_texture/dedup 各自已有独立 try，此处仅兜底意外错误
+        print(f"  [WARN] post quality layer 异常: {e}")
 
 # STEP 8: ingest
     result = ingest(chapter_no, chapter_type, app_inst=app)
@@ -434,40 +431,47 @@ def run_post(
     stage_review(chapter_no, app_inst=app)
 
 # ── 写作后自动流程：精神状态检查 + 完整审稿 + 改稿建议 ──
-    try:
-    # 1. 精神状态跨章跟踪（简易文件版）
-        import os as _os
-        _track_file = app.workspace_root / app.active_slot / "ptsd_tracker.json"
-        _triggers = ["水", "冷水", "刹车声", "玻璃", "碎裂", "强光", "血味", "安全带", "束缚", "车祸"]
-        _hits = sum(1 for _t in _triggers if _t in content)
-        _tracker = {"chapter": chapter_no, "hits": _hits}
-        if _track_file.exists():
-            try:
-                _prev = json.loads(_track_file.read_text(encoding="utf-8"))
-                if isinstance(_prev, list):
-                    _prev.append(_tracker)
-                    _total = sum(t["hits"] for t in _prev[-5:])
-                else:
-                    _prev = [_prev, _tracker]
+    # 1. 精神状态跨章跟踪（简易文件版，仅当 slot 配置了 mental_triggers.json）
+    _mt_track_cfg = load_mental_triggers(app)
+    if _mt_track_cfg:
+        try:
+            _track_file = app.workspace_root / app.active_slot / "mental_tracker.json"
+            _window = _mt_track_cfg["window"]
+            _hits = sum(1 for _t in _mt_track_cfg["triggers"] if _t in content)
+            _tracker = {"chapter": chapter_no, "hits": _hits}
+            if _track_file.exists():
+                try:
+                    _prev = json.loads(_track_file.read_text(encoding="utf-8"))
+                    if isinstance(_prev, list):
+                        _prev.append(_tracker)
+                        _total = sum(t["hits"] for t in _prev[-_window:])
+                    else:
+                        _prev = [_prev, _tracker]
+                        _total = _hits
+                except Exception:
+                    _prev = [_tracker]
                     _total = _hits
-            except Exception:
+            else:
                 _prev = [_tracker]
                 _total = _hits
-        else:
-            _prev = [_tracker]
-            _total = _hits
-        _track_file.write_text(json.dumps(_prev, ensure_ascii=False), encoding="utf-8")
-        if _hits >= 2:
-            print(f"  [MENTAL] PTSD trigger terms hit {_hits} times; last five chapters total {_total}")
-            if _total >= 8:
-                print("    [WARN] consider adding a decompression scene in this chapter")
-    except Exception as _e:
-        print(f"  [WARN] PTSD tracker skipped: {_e}")
+            _track_file.write_text(json.dumps(_prev, ensure_ascii=False), encoding="utf-8")
+            if _hits >= _mt_track_cfg["state_threshold"]:
+                print(f"  [MENTAL] {_mt_track_cfg['label']} 命中 {_hits} 次；近 {_window} 章累计 {_total}")
+                if _total >= _mt_track_cfg["window_total_threshold"]:
+                    print("    [WARN] 建议本章加一段解压/解离戏")
+        except Exception as _e:
+            from src.utils.error_handling import log_optional_failure
+            log_optional_failure("post: mental tracker", _e)
 
     try:
     # 2. 完整审稿
         from src.agents.orchestrator import run_agent_review
-        _full = run_agent_review(content, chapter_no=chapter_no, mode="full")
+        # 锚定到 project_root（与 pre.py / task_card_builder 的读取路径一致），
+        # 避免 orchestrator 默认相对 CWD 落盘导致读写错位。
+        _agent_reviews_dir = app.project_root / "reports" / "agent_reviews"
+        _full = run_agent_review(
+            content, chapter_no=chapter_no, mode="full",
+            config={"output_dir": str(_agent_reviews_dir)})
         if _full:
             _score = _full.get("overall_score", "?")
             _status = _full.get("status", "?")
