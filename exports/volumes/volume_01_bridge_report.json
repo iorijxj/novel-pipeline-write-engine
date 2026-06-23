@@ -2,7 +2,7 @@
   "volume_no": 1,
   "next_volume_no": 2,
   "volume_post_done": true,
-  "volume_summary_path": "D:\\ProseForge\\exports\\volume_reports\\volume_01_report.json",
+  "volume_summary_path": "D:\\Project\\ProseForge\\exports\\volume_reports\\volume_01_report.json",
   "ending_state": {
     "main_plot": "主角通过入门考核，在宗门大比中崭露头角",
     "character_state": "0 active characters",

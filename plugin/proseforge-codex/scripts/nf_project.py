@@ -66,15 +66,19 @@ def _run_project(args: argparse.Namespace) -> object:
         return result
 
     if args.action == "create":
-        _require_args(args, ["slot_name", "title"])
+        # 优先使用 --slug；--slot-name 保留为兼容别名
+        slot_id = args.slug or args.slot_name
+        if not slot_id:
+            raise ValueError("missing required argument for action 'create': --slug (或兼容别名 --slot-name)")
+        _require_args(args, ["title"])
         from src.db.slot_manager import SlotManager
 
         manager = SlotManager(REPO_ROOT)
-        result = manager.create_slot(args.slot_name, ensure_registry=True, name=args.title, description=args.title)
+        result = manager.create_slot(slot_id, ensure_registry=True, name=args.title, description=args.title)
         return {
             "status": "ok",
-            "message": f"slot '{args.slot_name}' created",
-            "slot": args.slot_name,
+            "message": f"slot '{slot_id}' created",
+            "slot": slot_id,
             "result": result,
         }
 

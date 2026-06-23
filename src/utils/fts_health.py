@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 
 from src.utils.config_utils import find_project_root, resolve_path
+from src.db._conn import connect_sqlite
 
 
 def _get_db_path(config: dict | None = None) -> Path:
@@ -34,7 +35,7 @@ def check_fts_health(config: dict | None = None) -> dict:
         }
 
     try:
-        conn = sqlite3.connect(str(db_path))
+        conn = connect_sqlite(db_path)
         tables = find_fts5_tables(conn)
         broken = []
         progress = []
@@ -101,7 +102,7 @@ def rebuild_fts(config: dict | None = None) -> dict:
             "failed_count": 0,
         }
 
-    conn = sqlite3.connect(str(db_path))
+    conn = connect_sqlite(db_path)
     tables = find_fts5_tables(conn)
     repaired = []
     failed = []
@@ -154,7 +155,7 @@ def safe_fts_search(
     if not db_path.exists():
         return {"ok": False, "error": "DB not found", "results": [], "method": "db_missing"}
 
-    conn = sqlite3.connect(str(db_path))
+    conn = connect_sqlite(db_path)
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT {columns} FROM {table} WHERE {table} MATCH ? LIMIT ?", (query, limit))
@@ -166,7 +167,7 @@ def safe_fts_search(
         conn.close()
 
     rebuild_result = rebuild_fts(config)
-    conn = sqlite3.connect(str(db_path))
+    conn = connect_sqlite(db_path)
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT {columns} FROM {table} WHERE {table} MATCH ? LIMIT ?", (query, limit))
@@ -191,7 +192,7 @@ def safe_fts_search(
     }.get(table, table)
 
     try:
-        conn = sqlite3.connect(str(db_path))
+        conn = connect_sqlite(db_path)
         cur = conn.cursor()
         words = query.split()
         conditions = " AND ".join([f"{columns} LIKE ?" for _ in words]) or "1=1"

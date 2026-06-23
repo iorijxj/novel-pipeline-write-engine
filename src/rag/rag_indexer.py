@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .rag_config import get_db_path, load_rag_config
 from .vector_retriever import HAS_VECTOR_DEPS, VectorRetriever
+from src.db._conn import connect_sqlite
 
 WORLD_BUILDING_COLLECTION = "novel_worldbuilding"
 
@@ -25,7 +26,7 @@ def _get_vector_config(config: dict) -> dict:
 
 
 def _query_rows(db_path: str, sql: str) -> list[dict]:
-    conn = sqlite3.connect(db_path)
+    conn = connect_sqlite(db_path)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.cursor()

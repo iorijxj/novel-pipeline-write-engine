@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
 """
-guard_registry.py — Unified Guard Registry v0.4.5
+guard_registry.py — Unified Guard Registry
 
-THE single entry point for all guard execution. post, orchestrator, CI, and
-Agent self-checks MUST call run_standard_guards() — never call individual
-guards directly.
+The single registration center for all L1/L2/L3 guards. New code should
+go through one of the two public entry points exposed here:
+
+  - run_standard_guards(content, chapter_no, mode=...) -> GuardSummary
+        Returns a structured GuardSummary. Preferred for new consumers.
+  - run_orchestrated(content, chapter_no, mode=...) -> dict
+        Returns a legacy dict shape. Used by post.py via the thin wrapper
+        in src/pipeline/guard_orchestrator.py. Internally delegates to
+        run_standard_guards.
+
+Both entries dispatch through the same `GUARD_RUNNERS` table — there is
+only one source of truth for which guard runs in which mode.
+
+Intentional exceptions (NOT routed through this registry):
+  - src/guards/human_texture/run_human_texture_guards: kept as a parallel
+    path because its output file `chapter_{N:03d}_texture_report.json` is
+    consumed cross-chapter by post.py (trend computation) and pre.py
+    (write-time context). post.py calls it directly after run_orchestrated.
 
 Key rules:
-  1. Only ONE place registers all guards and their execution logic.
-  2. post and orchestrator get the same GuardSummary.
+  1. Only ONE place registers L1/L2/L3 guard runners and their dispatch.
+  2. post and orchestrator get the same underlying GuardSummary.
   3. Every WARNING is a GuardFinding — never just a print().
   4. FTS health is checked before execution; if broken, attempts repair.
 """

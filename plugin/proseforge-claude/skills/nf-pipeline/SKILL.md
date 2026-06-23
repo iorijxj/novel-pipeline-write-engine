@@ -46,7 +46,7 @@ Always invoke from the repo root (`D:\ProseForge`) so the wrapper can resolve
 ## Optional arguments
 
 - `--chapter-type normal|key|climax`
-- `--mode light|full` for `review`
+- `--mode light|full` for `review` — light 跑 3 个 agent（continuity/prose/plot），full 跑 6 个（额外加 character/reader/detail）；两者审稿阈值相同，区别只在覆盖范围
 - `--project-root <path>` and `--config-path <path>` when the default repo/config location is not correct
 
 ## Examples

@@ -34,6 +34,7 @@ try:
 except Exception:
     def normalize_config(cfg): return cfg
 from src.pipeline._base import _find_chapter_file
+from src.db._conn import connect_sqlite
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -277,7 +278,7 @@ def export_novel(
         }
 
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn = connect_sqlite(db_path, read_only=True)
     except Exception as e:
         return {
             "status": "error",

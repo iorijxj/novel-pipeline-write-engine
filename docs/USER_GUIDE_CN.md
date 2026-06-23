@@ -114,8 +114,8 @@ chmod +x install.sh
 2. **`nf_状态()`** — 确认环境正常
 
 这会创建：
-- `workspace/registry.json`：工作区注册表
-- `workspace/slot_001/` 等：默认工作区目录
+- `workspace/registry.json`：工作区注册表（**初始为空，不预创建任何 slot**）
+- `workspace/<书名 slug>/`：第一次 `nf_大纲(action="add", ...)` 时根据大纲 title 自动派生 slug 创建
 
 ---
 
@@ -286,9 +286,9 @@ nf_续写 默认包含入库逻辑，无需额外命令。
 | 工具 | 功能 |
 |------|------|
 | `nf_列表()` | 列出所有工作区 |
-| `nf_新建(slot_name="slot_005", title="第二本小说")` | 创建新工作区 |
+| `nf_新建(slug="binghuozhige", title="冰火之歌")` | 显式创建新工作区（高阶用法；通常 outline add 自动建即可）|
 | `nf_状态()` | 查看当前激活槽位 |
-| `nf_大纲(action="switch", slot_name="slot_002")` | 切换工作区（通过大纲切换） |
+| `nf_大纲(action="switch", slot_name="my_novel")` | 切换工作区（通过大纲切换） |
 
 ### 大纲管理
 

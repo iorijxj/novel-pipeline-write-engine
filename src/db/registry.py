@@ -106,19 +106,11 @@ class Registry:
         self.save(data)
 
     def get_next_slot_id(self) -> str:
-        """Auto-generate the next slot ID (slot_xxx)."""
-        data = self.load()
-        max_idx = 0
-        for s in data.get("slots", []):
-            sid = s.get("id", "")
-            if sid.startswith("slot_"):
-                try:
-                    idx = int(sid.replace("slot_", ""))
-                    if idx > max_idx:
-                        max_idx = idx
-                except ValueError:
-                    pass
-        return f"slot_{max_idx + 1:03d}"
+        """[DEPRECATED] 仅作兜底。新代码请用 SlotManager.ensure_slot_for_outline(title)
+        按大纲名命名 slot。本函数现在返回时间戳风格的 novel_<ts>，避免延续 slot_NNN 命名。
+        """
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"novel_{ts}"
 
     def is_initialized(self) -> bool:
         """Check if workspace is properly initialized."""

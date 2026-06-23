@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Database initialization helpers for ProseForge."""
+"""Database initialization & migration helpers for ProseForge.
+
+Schema 权威源：``database/schema.sql``。新建 novel.db 时整份 schema 被一次性应用。
+
+迁移流程：
+- 增量改动放在 ``database/migrations/`` 下，文件名形如 ``NNNN_short_description.sql``
+- 按文件名字典序逐个应用；已应用的迁移记录在 ``schema_migrations`` 表里，幂等
+- 当前已有迁移：``0001_arc_character_and_relationship_tables.sql`` /
+  ``0002_fix_novel_chunk_fts_schema.sql``
+- 新增迁移：写一个 ``NNNN_xxx.sql`` 放进 migrations 目录即可，下一次 ``init_db``
+  调用时会自动应用
+
+入口：``init_db(db_path, schema_path, migrations)``——SlotManager 创建新 slot 时调它。
+"""
 
 from __future__ import annotations
 
@@ -8,6 +21,7 @@ import sqlite3
 from pathlib import Path
 
 from src.utils.config_utils import find_project_root, load_json_config
+from src.db._conn import connect_sqlite
 
 
 def load_config(config_path=None, project_root=None):
@@ -21,6 +35,11 @@ def find_schema(start: str | Path | None) -> Path | None:
 
 
 def find_migrations(start: str | Path | None):
+    """扫描 ``database/migrations/`` 下的 ``*.sql`` 文件，返回 [(filename, path)] 列表。
+
+    按文件名字典序排序——这意味着新增迁移**必须**按 ``NNNN_...`` 数字前缀命名以保证顺序。
+    目录不存在时返回 ``[]``（首次初始化场景）。
+    """
     project_root = find_project_root(start)
     migrations_dir = project_root / "database" / "migrations"
     if not migrations_dir.exists():
@@ -73,7 +92,7 @@ def init_db(db_path, schema_path, migrations=None):
     schema_path = Path(schema_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(db_path))
+    conn = connect_sqlite(db_path)
     try:
         schema_sql = schema_path.read_text(encoding="utf-8")
         conn.executescript(schema_sql)

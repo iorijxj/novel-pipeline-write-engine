@@ -14,6 +14,7 @@ import sqlite3
 from typing import Optional
 
 from src.utils.fts_health import safe_fts_search
+from src.db._conn import connect_sqlite
 
 
 def _enrich_chapter_results(conn: sqlite3.Connection, rowids: list[int]) -> list[dict]:
@@ -133,7 +134,7 @@ def search_chapters(
     enriched = []
     if enrich and rowids:
         try:
-            conn = sqlite3.connect(db_path)
+            conn = connect_sqlite(db_path)
             enriched = _enrich_chapter_results(conn, rowids[:top_k])
             conn.close()
         except Exception as e:
@@ -199,7 +200,7 @@ def search_chunks(
     enriched = []
     if enrich and rowids:
         try:
-            conn = sqlite3.connect(db_path)
+            conn = connect_sqlite(db_path)
             enriched = _enrich_chunk_results(conn, rowids[:top_k])
             conn.close()
         except Exception:

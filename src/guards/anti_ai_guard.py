@@ -295,13 +295,7 @@ def run_anti_ai_check(content: str, chapter_no: int = 0) -> dict:
     Guard-compatible entry point. Returns legacy dict format.
     Also used by guard_registry via _adapt_legacy_dict.
     """
-    score, findings = find_anti_ai_issues(content)
     return run_anti_ai_check_result(content, chapter_no)
-
-
-def find_anti_ai_issues(content: str):
-    """Shorthand alias used by existing code."""
-    return check_anti_ai(content)
 
 
 def run_anti_ai_check_result(content: str, chapter_no: int = 0) -> dict:

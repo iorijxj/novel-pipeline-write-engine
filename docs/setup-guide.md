@@ -129,7 +129,7 @@ novel-pipeline-write-engine/       ← 项目根目录
 ├── pyproject.toml                 ← Python 依赖与打包声明
 ├── workspace/                     ← 工作区（Multi-DB）
 │   ├── registry.json              ← 注册表
-│   ├── slot_001/                  ← 默认工作区
+│   ├── 冰火之歌/                  ← slot 按书名命名（outline add 时自动创建）
 │   │   ├── novel.db               ← 项目数据库
 │   │   ├── project.json           ← 项目配置
 │   │   ├── outlines/
@@ -137,8 +137,7 @@ novel-pipeline-write-engine/       ← 项目根目录
 │   │   ├── reports/
 │   │   ├── exports/
 │   │   └── backups/
-│   ├── slot_002/
-│   ├── slot_003/
+│   ├── my_novel/
 │   └── _trash/                    ← 回收站
 ├── scripts/                       ← 核心脚本
 │   ├── db/

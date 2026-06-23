@@ -73,6 +73,26 @@ def normalize_config(raw: dict | None) -> dict:
 
     scene_quality = cfg.get("scene_quality") if isinstance(cfg.get("scene_quality"), dict) else {}
     cfg["scene_quality"] = {"min_effective_scenes": scene_quality.get("min_effective_scenes", 1)}
+
+    # 兜底其它常用 config 字段，避免下游 cfg.get("xxx").get(...) 在缺字段时 None→AttributeError
+    cfg.setdefault("orchestrator_mode", "standard")
+    cfg.setdefault("quality_policy", {})
+    if isinstance(cfg["quality_policy"], dict):
+        cfg["quality_policy"].setdefault("max_final_revision_tasks", 5)
+        cfg["quality_policy"].setdefault("min_warning_confidence", 0.55)
+        cfg["quality_policy"].setdefault("deduplicate_warnings", True)
+        cfg["quality_policy"].setdefault("pace_level", "normal")
+    else:
+        cfg["quality_policy"] = {
+            "max_final_revision_tasks": 5,
+            "min_warning_confidence": 0.55,
+            "deduplicate_warnings": True,
+            "pace_level": "normal",
+        }
+    cfg.setdefault("agents", {})
+    if not isinstance(cfg["agents"], dict):
+        cfg["agents"] = {}
+
     return cfg
 
 

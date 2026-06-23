@@ -95,7 +95,7 @@ uv pip install pytest
 python -m pytest tests/ -x -q
 ```
 
-预期输出：全部测试通过（~350+ 项）。
+预期输出：全部测试通过（~280 项）。
 
 ---
 
@@ -153,7 +153,7 @@ pre -> write -> post
 Hermes / Codex / Claude
     -> nf_project / nf_pipeline
     -> 本地 wrapper / plugin surface
-    -> src/bios.py
+    -> src/runtime.py (ProjectPaths / PipelineContext)
     -> src/pipeline/
         -> pre / post / volume / export
         -> guards
@@ -200,10 +200,10 @@ Hermes / Codex / Claude
 | `src/db/` | workspace、slot、registry、数据库管理 |
 | `src/outline/` | 大纲导入、切换、版本相关逻辑 |
 | `src/story/` | story contract、章节承接、story health |
-| `src/revision_planner/` | 新版改写规划与执行路径 |
-| `src/voice/` | voice pack 和角色口吻相关支持 |
+| `src/rag/` | FTS5 + 向量混合检索，pre.py 的世界观提醒走这里 |
+| `src/utils/` | config_utils / guard_result 等公共工具 |
 
-`src/bios.py` 是一个很薄的统一分派层，用来把外部动作接到内部 pipeline。
+`src/runtime.py` 是统一的路径与上下文层，对外暴露 `ProjectPaths` 与 `PipelineContext` 两个 dataclass，pipeline / guard 都从这里拿到工作区根目录、配置和 slot 信息。voice 相关资源放在 `packs/voice/`（不是 src 模块）。
 
 ### 3. 质量门禁层
 
@@ -239,28 +239,18 @@ Hermes / Codex / Claude
 
 ### 5. 改写层
 
-当前仓库里同时存在两条改写路线：
-
-- `src/rewriter.py`：遗留改写实现，已不再作为 `nf_pipeline` 对外动作
-- `src/revision_planner/`：新版 revision planning 路径
-
-历史上的 `rewrite` 路径有一个重要特点：
-
-- 输出 `.revised.txt`
-- 不覆盖原始章节文件
-
-这点很重要，因为它保证改稿是增量产物，而不是直接破坏原稿。
+当前版本没有独立的改写模块。`rewrite` 已从 `nf_pipeline` 下线，改写动作由 `review` 输出的 findings 驱动——后续可由人工或外部 Agent 基于 review 报告改稿。原则不变：改稿是增量产物，不覆盖原稿。
 
 ### 6. 存储层
 
-工作区使用 `workspace/` 作为项目容器，每个 `slot` 都可以看成一部小说的独立工作区。
+工作区使用 `workspace/` 作为项目容器，每个 `slot` 都可以看成一部小说的独立工作区。**slot 按大纲名命名**——导入大纲时会自动用书名派生 slug 创建同名 slot。
 
 典型结构如下：
 
 ```text
 workspace/
 |- registry.json
-|- slot_001/
+|- 冰火之歌/                 # 第一本小说，slot 名 = 书名 slug
 |  |- novel.db
 |  |- project.json
 |  |- outlines/
@@ -268,13 +258,12 @@ workspace/
 |  |- reports/
 |  |- exports/
 |  `- backups/
-|- slot_002/
-`- slot_003/
+`- my_novel/                # 第二本小说
 ```
 
 这里最值得记住的一点是：
 
-> 一个 `slot` 基本就等于一个独立项目容器。不同小说尽量不串库、不串上下文、不串报告。
+> 一个 `slot` 基本就等于一个独立项目容器，按书名命名。不同小说不串库、不串上下文、不串报告。`nf_project init` 不再预创建 slot——第一次 `outline add` 自动按 title 派生 slug 创建。
 
 ---
 
@@ -395,7 +384,7 @@ review
 
 1. `plugin/proseforge-codex/scripts/nf_project.py`
 2. `plugin/proseforge-codex/scripts/nf_pipeline.py`
-3. `src/bios.py`
+3. `src/runtime.py`
 4. `src/pipeline/pre.py`
 5. `src/pipeline/post.py`
 6. `src/agents/orchestrator.py`
@@ -404,7 +393,7 @@ review
 原因很简单：
 
 - 先看 wrapper，知道外部怎么进来
-- 再看 `bios.py`，知道动作怎么分派
+- 再看 `runtime.py`，知道路径/上下文怎么构建
 - 再看 `pre` / `post`，知道主流水线怎么跑
 - 再看 `agents` 和 `guards`，知道质量系统怎么挂上去
 
