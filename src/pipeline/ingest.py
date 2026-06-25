@@ -90,16 +90,24 @@ def ingest(chapter_no, chapter_type="normal", app_inst=None):
             ch_id = existing[0]
             cur.execute("UPDATE chapters SET title=?,content=?,word_count=?,file_path=?,updated_at=?,volume_id=? WHERE id=?",
                 (title, content, wc, str(filepath), ts, vol_id, ch_id))
+            # 外部内容 FTS：先用 'delete' 命令（需旧 rowid+content）移除旧 chunk 索引，再删基表行。
+            # rowid 与 chapter_chunks.id 对齐，rebuild 才不会和本地维护打架。
+            try:
+                old_chunks = cur.execute(
+                    "SELECT id, content FROM chapter_chunks WHERE chapter_id=?", (ch_id,)
+                ).fetchall()
+                for _cid, _ctext in old_chunks:
+                    cur.execute(
+                        "INSERT INTO novel_chunk_fts(novel_chunk_fts, rowid, content) VALUES('delete', ?, ?)",
+                        (_cid, _ctext),
+                    )
+            except Exception as exc:
+                _record_fts_error("delete novel_chunk_fts", exc)
             cur.execute("DELETE FROM chapter_chunks WHERE chapter_id=?", (ch_id,))
             try:
                 cur.execute("DELETE FROM novel_chapter_fts WHERE rowid=?", (ch_id,))
             except Exception as exc:
                 _record_fts_error("delete novel_chapter_fts", exc)
-            try:
-                base_rowid = ch_id * 10000
-                cur.execute("DELETE FROM novel_chunk_fts WHERE rowid>=? AND rowid<?", (base_rowid, base_rowid + 10000))
-            except Exception as exc:
-                _record_fts_error("delete novel_chunk_fts", exc)
         else:
             cur.execute("INSERT INTO chapters(novel_id,chapter_no,title,content,word_count,status,file_path,volume_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (nid, chapter_no, title, content, wc, 'draft', str(filepath), vol_id, ts, ts))
@@ -132,18 +140,20 @@ def ingest(chapter_no, chapter_type="normal", app_inst=None):
             (nid, ch_id, chapter_no, vno, 'draft', title, content, wc, f"第{chapter_no}章v{vno}"))
 
         # --- chunks + FTS ---
+        # 外部内容 FTS（content='chapter_chunks', content_rowid='id'）要求 FTS rowid == chapter_chunks.id，
+        # 否则 _enrich_chunk_results 命中不到、rebuild 又会覆盖本地写。用 lastrowid 取真实 id。
         chunks = _chunk_text(content)
         for cno, ctext in chunks:
             cur.execute("INSERT INTO chapter_chunks(novel_id,chapter_id,chunk_no,content,word_count,created_at) VALUES(?,?,?,?,?,?)", (nid, ch_id, cno, ctext, len(ctext), ts))
+            chunk_id = cur.lastrowid
+            try:
+                cur.execute("INSERT INTO novel_chunk_fts(rowid,content) VALUES(?,?)", (chunk_id, ctext))
+            except Exception as exc:
+                _record_fts_error(f"insert novel_chunk_fts chunk {cno}", exc)
         try:
             cur.execute("INSERT INTO novel_chapter_fts(rowid,title,content,summary) VALUES(?,?,?,?)", (ch_id, title, content, ''))
         except Exception as exc:
             _record_fts_error("insert novel_chapter_fts", exc)
-        for cno, ctext in chunks:
-            try:
-                cur.execute("INSERT INTO novel_chunk_fts(rowid,content) VALUES(?,?)", (ch_id * 10000 + cno, ctext))
-            except Exception as exc:
-                _record_fts_error(f"insert novel_chunk_fts chunk {cno}", exc)
         _update_pipeline_state(
             fts_sync_ok=not fts_sync_errors,
             fts_sync_errors=fts_sync_errors,
