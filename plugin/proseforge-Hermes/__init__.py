@@ -13,6 +13,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+import functools
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +455,19 @@ NF_PROJECT_SCHEMA = {
 
 # ── 注册入口 ────────────────────────────────────────────────────────────
 
+
+def _wrap_result(fn):
+    """Wrap dict/list returns as JSON string.
+    DeepSeek rejects non-string content in tool-result messages.
+    """
+    @functools.wraps(fn)
+    def wrapper(*a, **kw):
+        result = fn(*a, **kw)
+        if isinstance(result, (dict, list)):
+            return json.dumps(result, ensure_ascii=False)
+        return result
+    return wrapper
+
 def register(ctx) -> None:
     """Registered by Hermes plugin loader on enable."""
     if not PROSEFORGE_DIR.exists():
@@ -464,14 +478,14 @@ def register(ctx) -> None:
         name="nf_pipeline",
         toolset="proseforge-engine",
         schema=NF_PIPELINE_SCHEMA,
-        handler=_handle_pipeline,
+        handler=_wrap_result(_handle_pipeline),
         emoji="\N{WRENCH}",
     )
     ctx.register_tool(
         name="nf_project",
         toolset="proseforge-engine",
         schema=NF_PROJECT_SCHEMA,
-        handler=_handle_project,
+        handler=_wrap_result(_handle_project),
         emoji="\N{OPEN FILE FOLDER}",
     )
 
