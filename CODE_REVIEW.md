@@ -167,7 +167,7 @@ except Exception:
 |------|------|------|
 | **P0 #1** 三文件截断 | **已失效/已修复** | `py_compile` + import 全过；提交 `3f9dfdd` 重写 `init_db.py`/`slot_manager.py`/`_base.py`，285 测试绿。报告快照的是工作树被截断的瞬态。 |
 | **High #2** FTS rowid 契约 | **✅ 已修复（本批）** | `ingest.py` 改用真实 `chapter_chunks.id`（`cur.lastrowid`）作 FTS rowid，重灌走外部内容 `'delete'` 命令；RAG 分块富化与 rebuild churn 一并修复。 |
-| **High #3** pre 连接生命周期 | **真实** | `pre.py:89` 开写连接，无包裹 `try/finally`，~700 行后才 commit/close。 |
+| **High #3** pre 连接生命周期 | **✅ 已修复** | `run_pre` 业务体包进 `try/finally`：`conn.commit()` 在 try 末，`conn.close()` 在 finally，异常路径保证关连接；state 保存/return 在 try 外（本就不用 conn）。行为不变，295 测试绿。 |
 | **High #4** registry 非原子写 | **✅ 已修复（本批）** | `write_json_atomic` 下沉到 `src/utils/json_io.py`，`registry.save` + slot 4 处 JSON 写改原子写。 |
 | **Med #5** 分数方向反 | **✅ 已修复** | 输出显式标注"问题分/越低越好"：`post.py` 打印 `issue-score`，orchestrator 报告加 `score_direction: lower_is_better`（不反转数值，避免动消费方）。 |
 | **Med #6** 去重交叉确认失效 | **⃝ 实测已满足** | 复核发现现行代码 `_adapt_legacy_dict:147` 已把子检测名写入 `source_guard` 并直达去重（`run_orchestrated` 用 `get_warnings()`）；实测两子检测合并、`reported_by` 为 2 个来源。报告结论已过时；加回归测试 `test_dedup_counts_distinct_subcheck_sources` 锁定。 |
