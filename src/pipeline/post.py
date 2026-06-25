@@ -100,6 +100,93 @@ def word_count_gate(content, chapter_no, chapter_type="normal", genre=None, app_
 # ============================================================
 
 
+def _post_resolve_state(app, chapter_no):
+    """校验/bootstrap pipeline_state；返回 (state, state_path)。"""
+    state_path = app.state_dir / f"chapter_{chapter_no:03d}_state.json"
+    if not state_path.exists():
+        # Bootstrap minimal state — post doesn't need full pre
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state = {"allowed_to_write": True, "genre": "", "chapter_no": chapter_no,
+                 "timestamp": datetime.now().isoformat(), "_bootstrapped": True}
+        write_json_atomic(state_path, state)
+        print(f"[OK] 已生成最小 pipeline_state (post 无需完整 pre)")
+    else:
+        state = json.loads(state_path.read_text(encoding='utf-8'))
+        if not state.get("allowed_to_write"):
+            raise RuntimeError("pre 未完成，禁止 post")
+        print("[OK] pipeline_state verified (pre completed at {})".format(state.get("timestamp", "?")))
+    return state, state_path
+
+
+def _post_fts_health(cfg):
+    """post 前 FTS5 健康检查 + 自动 repair（best-effort，缺依赖则跳过）。"""
+    try:
+        from src.utils.fts_health import ensure_fts_healthy
+        fts_result = ensure_fts_healthy(cfg)
+        health_before = fts_result.get("health_before", {})
+        print(f"  [FTS] scope: {health_before.get('total_tables', 0)} table(s)")
+        for step in fts_result.get("repair", {}).get("progress", []):
+            if step.get("status") == "repaired":
+                print(f"  [FTS] {step['index']}/{step['total_tables']} {step['table']} -> {step.get('method', 'rebuild')}")
+        if fts_result["action"] == "repaired":
+            print(f"  [FTS] repaired: {fts_result.get('repair',{}).get('repaired_count',0)} table(s)")
+        elif fts_result["action"] == "repair_failed":
+            print(f"  [WARN] FTS repair failed — fallback LIKE search will be used")
+    except ImportError:
+        pass
+
+
+def _post_detect_mental_triggers(app, content, state, state_path):
+    """精神状态触发词检测（仅当 slot 配 mental_triggers.json）；命中则写回 state。"""
+    _mt_cfg = load_mental_triggers(app)
+    if _mt_cfg:
+        _mt_label = _mt_cfg["label"]
+        _trigger_hits = 0
+        _trigger_detail = {}
+        for _tw in _mt_cfg["triggers"]:
+            _cnt = content.count(_tw)
+            if _cnt > 0:
+                _trigger_hits += _cnt
+                _trigger_detail[_tw] = _cnt
+        if _trigger_hits >= _mt_cfg["state_threshold"]:
+            print(f"\n  [{_mt_label}] 命中{_trigger_hits}次: {_trigger_detail}")
+            state["mental_trigger_hits"] = _trigger_hits
+            state["mental_trigger_detail"] = _trigger_detail
+            write_json_atomic(state_path, state)
+            if _trigger_hits >= _mt_cfg["advise_threshold"]:
+                print(f"  \U0001f534 {_mt_label}加重，建议写一段解压/解离戏")
+            else:
+                print(f"  ⚠️ {_mt_label}出现{_trigger_hits}次")
+
+
+def _post_resolve_genre(app, state):
+    """从 state 取 genre；缺失时回退 novels 表（按 slug）。"""
+    genre = state.get("genre", "") if state else ""
+    if not genre:
+        try:
+            with closing(connect_sqlite(app.db_path)) as conn3:
+                row3 = conn3.execute("SELECT genre FROM novels WHERE slug=?", (app.novel_slug,)).fetchone()
+                if row3 and row3[0]:
+                    genre = row3[0]
+        except Exception:
+            pass
+    return genre
+
+
+def _post_load_prev_brief(app, chapter_no):
+    """读取上一章 brief；返回 (prev_brief, prev_tail_text)。"""
+    prev_brief_path = app.exports_root / "chapter_briefs" / f"chapter_{chapter_no-1:03d}_brief.json"
+    prev_brief = None
+    prev_tail_text = ""
+    if prev_brief_path.exists():
+        try:
+            prev_brief = json.loads(prev_brief_path.read_text(encoding='utf-8'))
+            prev_tail_text = prev_brief.get("ending_state", "")
+        except Exception:
+            pass
+    return prev_brief, prev_tail_text
+
+
 def run_post(
     chapter_no,
     chapter_type="normal",
@@ -153,71 +240,19 @@ def run_post(
         raise RuntimeError(f"找不到第{chapter_no}章TXT (目录: {app.chapters_dir})")
 
     # 检查 pre 是否完成（允许 bootstrapped minimal state）
-    state_path = app.state_dir / f"chapter_{chapter_no:03d}_state.json"
-    if not state_path.exists():
-        # Bootstrap minimal state — post doesn't need full pre
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        state = {"allowed_to_write": True, "genre": "", "chapter_no": chapter_no,
-                 "timestamp": datetime.now().isoformat(), "_bootstrapped": True}
-        write_json_atomic(state_path, state)
-        print(f"[OK] 已生成最小 pipeline_state (post 无需完整 pre)")
-    else:
-        state = json.loads(state_path.read_text(encoding='utf-8'))
-        if not state.get("allowed_to_write"):
-            raise RuntimeError("pre 未完成，禁止 post")
-        print("[OK] pipeline_state verified (pre completed at {})".format(state.get("timestamp", "?")))
+    state, state_path = _post_resolve_state(app, chapter_no)
 
-# v0.4.5: FTS5 health check before post
-    try:
-        from src.utils.fts_health import ensure_fts_healthy
-        fts_result = ensure_fts_healthy(cfg)
-        health_before = fts_result.get("health_before", {})
-        print(f"  [FTS] scope: {health_before.get('total_tables', 0)} table(s)")
-        for step in fts_result.get("repair", {}).get("progress", []):
-            if step.get("status") == "repaired":
-                print(f"  [FTS] {step['index']}/{step['total_tables']} {step['table']} -> {step.get('method', 'rebuild')}")
-        if fts_result["action"] == "repaired":
-            print(f"  [FTS] repaired: {fts_result.get('repair',{}).get('repaired_count',0)} table(s)")
-        elif fts_result["action"] == "repair_failed":
-            print(f"  [WARN] FTS repair failed — fallback LIKE search will be used")
-    except ImportError:
-        pass
+    # v0.4.5: FTS5 health check before post
+    _post_fts_health(cfg)
 
     with open(chapter_file, 'r', encoding='utf-8') as f:
         content = _strip_selfcheck(f.read())
 
-# ── 1.2 精神状态触发词检测（仅当 slot 配置了 mental_triggers.json）──
-    _mt_cfg = load_mental_triggers(app)
-    if _mt_cfg:
-        _mt_label = _mt_cfg["label"]
-        _trigger_hits = 0
-        _trigger_detail = {}
-        for _tw in _mt_cfg["triggers"]:
-            _cnt = content.count(_tw)
-            if _cnt > 0:
-                _trigger_hits += _cnt
-                _trigger_detail[_tw] = _cnt
-        if _trigger_hits >= _mt_cfg["state_threshold"]:
-            print(f"\n  [{_mt_label}] 命中{_trigger_hits}次: {_trigger_detail}")
-            state["mental_trigger_hits"] = _trigger_hits
-            state["mental_trigger_detail"] = _trigger_detail
-            write_json_atomic(state_path, state)
-            if _trigger_hits >= _mt_cfg["advise_threshold"]:
-                print(f"  \U0001f534 {_mt_label}加重，建议写一段解压/解离戏")
-            else:
-                print(f"  ⚠️ {_mt_label}出现{_trigger_hits}次")
+    # ── 1.2 精神状态触发词检测（仅当 slot 配置了 mental_triggers.json）──
+    _post_detect_mental_triggers(app, content, state, state_path)
 
-# STEP 4: word_count
-    _pipeline_genre = state.get("genre", "") if state else ""
-# v0.7.1 fix: fallback to novels table if pipeline_state lacks genre (e.g. pre ran before genre was set)
-    if not _pipeline_genre:
-        try:
-            with closing(connect_sqlite(app.db_path)) as conn3:
-                row3 = conn3.execute("SELECT genre FROM novels WHERE slug=?", (app.novel_slug,)).fetchone()
-                if row3 and row3[0]:
-                    _pipeline_genre = row3[0]
-        except Exception:
-            pass
+    # STEP 4: word_count（genre 缺失时回退 novels 表）
+    _pipeline_genre = _post_resolve_genre(app, state)
     wc_pass, wc, eff_min = word_count_gate(
         content,
         chapter_no,
@@ -257,15 +292,8 @@ def run_post(
         else:
             raise RuntimeError(f"word count gate failed; short by {eff_min - wc} chars")
 
-# Read prev_brief/prev_tail once for all downstream guards
-    prev_brief_path = app.exports_root / "chapter_briefs" / f"chapter_{chapter_no-1:03d}_brief.json"
-    prev_brief = None
-    prev_tail_text = ""
-    if prev_brief_path.exists():
-        try:
-            prev_brief = json.loads(prev_brief_path.read_text(encoding='utf-8'))
-            prev_tail_text = prev_brief.get("ending_state", "")
-        except Exception: pass
+    # Read prev_brief/prev_tail once for all downstream guards
+    prev_brief, prev_tail_text = _post_load_prev_brief(app, chapter_no)
 
     ce_reports_dir = app.exports_root / "reports"
     ce_reports_dir.mkdir(parents=True, exist_ok=True)
