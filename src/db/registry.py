@@ -11,6 +11,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, List
 
+from src.utils.json_io import write_json_atomic
+
 
 class Registry:
     """Manages the workspace/registry.json file."""
@@ -31,11 +33,8 @@ class Registry:
         return json.loads(self.registry_file.read_text(encoding="utf-8"))
 
     def save(self, data: Dict) -> None:
-        """Save registry data."""
-        self.registry_file.parent.mkdir(parents=True, exist_ok=True)
-        self.registry_file.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        """Save registry data（原子写，避免半写损坏 registry.json）。"""
+        write_json_atomic(self.registry_file, data)
 
     def get_active_slot(self) -> str:
         """Get the currently active slot ID."""

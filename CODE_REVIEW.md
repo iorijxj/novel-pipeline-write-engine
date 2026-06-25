@@ -166,9 +166,9 @@ except Exception:
 | 编号 | 结论 | 证据 |
 |------|------|------|
 | **P0 #1** 三文件截断 | **已失效/已修复** | `py_compile` + import 全过；提交 `3f9dfdd` 重写 `init_db.py`/`slot_manager.py`/`_base.py`，285 测试绿。报告快照的是工作树被截断的瞬态。 |
-| **High #2** FTS rowid 契约 | **真实** | `ingest.py:144` 对外部内容表 `novel_chunk_fts` 用合成 rowid `ch_id*10000+cno`；疑为反复 FTS repair 根因。 |
+| **High #2** FTS rowid 契约 | **✅ 已修复（本批）** | `ingest.py` 改用真实 `chapter_chunks.id`（`cur.lastrowid`）作 FTS rowid，重灌走外部内容 `'delete'` 命令；RAG 分块富化与 rebuild churn 一并修复。 |
 | **High #3** pre 连接生命周期 | **真实** | `pre.py:89` 开写连接，无包裹 `try/finally`，~700 行后才 commit/close。 |
-| **High #4** registry 非原子写 | **真实** | `registry.py:36` + `slot_manager.py:181/357/550/591` 裸 `write_text`，未用现成 `write_json_atomic`。 |
+| **High #4** registry 非原子写 | **✅ 已修复（本批）** | `write_json_atomic` 下沉到 `src/utils/json_io.py`，`registry.save` + slot 4 处 JSON 写改原子写。 |
 | **Med #5** 分数方向反 | **真实** | `base_agent.py:46`「higher = more issues」；`orchestrator.py:113` 取均值，`post.py` 直接打印。 |
 | **Med #6** 去重交叉确认失效 | **真实** | `report_deduplicator.py:162` `len(sources)>=2 or avg_conf>0.7`；v0.8.0 后子检测身份丢失使 sources≈1。 |
 | **Med #7** 静默吞错 | **真实** | `voice_diversity_guard.py` 19 处 `except Exception`；叠加 fail-open + L2 永不 FAIL。 |

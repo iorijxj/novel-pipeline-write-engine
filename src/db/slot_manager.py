@@ -15,6 +15,7 @@ from typing import Optional, Dict, List
 from src.db.init_db import ensure_db_schema, find_migrations, find_schema, init_db
 from src.db.registry import Registry
 from src.db._conn import connect_sqlite
+from src.utils.json_io import write_json_atomic
 
 
 # Standard slot subdirectory structure
@@ -178,9 +179,7 @@ class SlotManager:
             "updated_at": datetime.now().isoformat(),
         }
         proj_file = slot_dir / "project.json"
-        proj_file.write_text(
-            json.dumps(proj_data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        write_json_atomic(proj_file, proj_data)
 
         # Add to registry
         if ensure_registry:
@@ -354,9 +353,7 @@ class SlotManager:
             "trashed_at": datetime.now().isoformat(),
             "trash_name": trash_name,
         }
-        meta_file.write_text(
-            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        write_json_atomic(meta_file, meta)
 
         # Remove from registry
         self.registry.remove_slot(slot_id)
@@ -547,9 +544,7 @@ class SlotManager:
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_file = backup_dir / f"backup_{timestamp}.json"
-        backup_file.write_text(
-            json.dumps(proj, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        write_json_atomic(backup_file, proj)
 
         return {
             "status": "ok",
@@ -588,9 +583,7 @@ class SlotManager:
         # Restore
         backup_data = json.loads(target.read_text(encoding="utf-8"))
         proj_file = slot_dir / "project.json"
-        proj_file.write_text(
-            json.dumps(backup_data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        write_json_atomic(proj_file, backup_data)
 
         # Update registry
         self.registry.update_slot_status(slot_id, "active")

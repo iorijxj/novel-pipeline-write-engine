@@ -246,9 +246,6 @@ def find_chapter_file_with_fallback(chapter_no: int, app_inst: App | PipelineCon
     return None
 
 
-def write_json_atomic(path, obj) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(str(tmp), str(path))
+# write_json_atomic 已下沉到 src.utils.json_io（避免 db→pipeline 反向依赖）；
+# 这里再导出，保持 `from src.pipeline._base import write_json_atomic` 的旧引用可用。
+from src.utils.json_io import write_json_atomic  # noqa: E402,F401
