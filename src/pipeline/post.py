@@ -365,6 +365,123 @@ def _post_dedup_tasks(orch_report, quality_policy, ce_reports_dir, chapter_no):
         print(f"  [WARN] dedup skipped: {e}")
 
 
+def _post_track_mental(app, content, chapter_no):
+    """精神状态跨章跟踪（简易文件版，仅当 slot 配 mental_triggers.json）。"""
+    _mt_track_cfg = load_mental_triggers(app)
+    if _mt_track_cfg:
+        try:
+            _track_file = app.workspace_root / app.active_slot / "mental_tracker.json"
+            _window = _mt_track_cfg["window"]
+            _hits = sum(1 for _t in _mt_track_cfg["triggers"] if _t in content)
+            _tracker = {"chapter": chapter_no, "hits": _hits}
+            if _track_file.exists():
+                try:
+                    _prev = json.loads(_track_file.read_text(encoding="utf-8"))
+                    if isinstance(_prev, list):
+                        _prev.append(_tracker)
+                        _total = sum(t["hits"] for t in _prev[-_window:])
+                    else:
+                        _prev = [_prev, _tracker]
+                        _total = _hits
+                except Exception:
+                    _prev = [_tracker]
+                    _total = _hits
+            else:
+                _prev = [_tracker]
+                _total = _hits
+            _track_file.write_text(json.dumps(_prev, ensure_ascii=False), encoding="utf-8")
+            if _hits >= _mt_track_cfg["state_threshold"]:
+                print(f"  [MENTAL] {_mt_track_cfg['label']} 命中 {_hits} 次；近 {_window} 章累计 {_total}")
+                if _total >= _mt_track_cfg["window_total_threshold"]:
+                    print("    [WARN] 建议本章加一段解压/解离戏")
+        except Exception as _e:
+            from src.utils.error_handling import log_optional_failure
+            log_optional_failure("post: mental tracker", _e)
+
+
+def _post_agent_review(app, content, chapter_no):
+    """完整 agent 审稿，落盘到 project_root/reports/agent_reviews 并打印摘要。"""
+    try:
+    # 2. 完整审稿
+        from src.agents.orchestrator import run_agent_review
+        # 锚定到 project_root（与 pre.py / task_card_builder 的读取路径一致），
+        # 避免 orchestrator 默认相对 CWD 落盘导致读写错位。
+        _agent_reviews_dir = app.project_root / "reports" / "agent_reviews"
+        _full = run_agent_review(
+            content, chapter_no=chapter_no, mode="full",
+            config={"output_dir": str(_agent_reviews_dir)})
+        if _full:
+            _score = _full.get("overall_score", "?")
+            _status = _full.get("status", "?")
+            # score 是"问题分"：越高越差（base_agent: higher = more issues）
+            print(f"  [REVIEW] full mode: issue-score {_score}/100 (越低越好), status {_status}")
+            _ce = _full.get("chief_editor", {})
+            if isinstance(_ce, dict):
+                _summary = _ce.get("suggestion", "")
+                if _summary:
+                    print(f"    chief editor summary: {str(_summary)[:120]}")
+                _f = _ce.get("should_fix", [])
+                if isinstance(_f, list):
+                    for _item in _f[:2]:
+                        _txt = str(_item.get("issue", _item))[:100]
+                        print(f"    🔴 {_txt}")
+    except Exception as _e:
+        print(f"  [WARN] agent review skipped: {_e}")
+
+
+def _post_detect_fixes(app, chapter_no):
+    """从聚合 guard 报告下钻 padding / anti_ai 子项，打印可优化点。"""
+    try:
+    # 3. 改稿检测（v0.8.0：从聚合 guard 报告下钻 _guards_raw 取 padding / anti_ai 子项）
+        _reports_dir = app.exports_root / "reports"
+        if _reports_dir.exists():
+            _fixes = []
+
+            def _load_sub(parent_guard: str, sub_guard: str):
+                _path = _reports_dir / f"chapter_{chapter_no:03d}_{parent_guard}_report.json"
+                if not _path.exists():
+                    return None
+                try:
+                    _data = json.loads(_path.read_text(encoding="utf-8"))
+                except Exception:
+                    return None
+                # v0.8.0: _guards_raw 经 GuardResult.to_dict() 包进 metrics；旧聚合 dict 仍在顶层
+                _subs = (_data.get("_guards_raw")
+                         or (_data.get("metrics") or {}).get("_guards_raw")
+                         or [])
+                for _sub in _subs:
+                    if isinstance(_sub, dict) and _sub.get("guard") == sub_guard:
+                        return _sub
+                return None
+
+            _padding = _load_sub("narrative_rhythm_guard", "padding_guard")
+            if _padding:
+                if _padding.get("padding_detected") and _padding.get("padding_evidence"):
+                    _ev = _padding["padding_evidence"]
+                    if isinstance(_ev, list):
+                        _fixes.extend([f"水文: {str(e)[:60]}" for e in _ev[:2]])
+
+            _ai = _load_sub("prose_authenticity_guard", "anti_ai_guard")
+            if _ai:
+                _findings = _ai.get("findings", [])
+                if isinstance(_findings, list):
+                    for _f_item in _findings:
+                        _msg = _f_item.get("message", "") if isinstance(_f_item, dict) else str(_f_item)
+                        if _msg and len(_msg) > 5:
+                            _fixes.append(_msg[:80])
+                elif isinstance(_findings, dict):
+                    for _k, _v in _findings.items():
+                        if isinstance(_v, (list, dict)) and len(str(_v)) > 5:
+                            _fixes.append(f"AI腔调: {_k}")
+
+            if _fixes:
+                print(f"  [改稿] 检测到{len(_fixes)}处可优化")
+                for _f in _fixes[:3]:
+                    print(f"    🟡 {_f}")
+    except Exception as _e:
+        print(f"  [WARN] fix detection skipped: {_e}")
+
+
 def run_post(
     chapter_no,
     chapter_type="normal",
@@ -476,113 +593,13 @@ def run_post(
 
 # ── 写作后自动流程：精神状态检查 + 完整审稿 + 改稿建议 ──
     # 1. 精神状态跨章跟踪（简易文件版，仅当 slot 配置了 mental_triggers.json）
-    _mt_track_cfg = load_mental_triggers(app)
-    if _mt_track_cfg:
-        try:
-            _track_file = app.workspace_root / app.active_slot / "mental_tracker.json"
-            _window = _mt_track_cfg["window"]
-            _hits = sum(1 for _t in _mt_track_cfg["triggers"] if _t in content)
-            _tracker = {"chapter": chapter_no, "hits": _hits}
-            if _track_file.exists():
-                try:
-                    _prev = json.loads(_track_file.read_text(encoding="utf-8"))
-                    if isinstance(_prev, list):
-                        _prev.append(_tracker)
-                        _total = sum(t["hits"] for t in _prev[-_window:])
-                    else:
-                        _prev = [_prev, _tracker]
-                        _total = _hits
-                except Exception:
-                    _prev = [_tracker]
-                    _total = _hits
-            else:
-                _prev = [_tracker]
-                _total = _hits
-            _track_file.write_text(json.dumps(_prev, ensure_ascii=False), encoding="utf-8")
-            if _hits >= _mt_track_cfg["state_threshold"]:
-                print(f"  [MENTAL] {_mt_track_cfg['label']} 命中 {_hits} 次；近 {_window} 章累计 {_total}")
-                if _total >= _mt_track_cfg["window_total_threshold"]:
-                    print("    [WARN] 建议本章加一段解压/解离戏")
-        except Exception as _e:
-            from src.utils.error_handling import log_optional_failure
-            log_optional_failure("post: mental tracker", _e)
+    _post_track_mental(app, content, chapter_no)
 
-    try:
     # 2. 完整审稿
-        from src.agents.orchestrator import run_agent_review
-        # 锚定到 project_root（与 pre.py / task_card_builder 的读取路径一致），
-        # 避免 orchestrator 默认相对 CWD 落盘导致读写错位。
-        _agent_reviews_dir = app.project_root / "reports" / "agent_reviews"
-        _full = run_agent_review(
-            content, chapter_no=chapter_no, mode="full",
-            config={"output_dir": str(_agent_reviews_dir)})
-        if _full:
-            _score = _full.get("overall_score", "?")
-            _status = _full.get("status", "?")
-            # score 是"问题分"：越高越差（base_agent: higher = more issues）
-            print(f"  [REVIEW] full mode: issue-score {_score}/100 (越低越好), status {_status}")
-            _ce = _full.get("chief_editor", {})
-            if isinstance(_ce, dict):
-                _summary = _ce.get("suggestion", "")
-                if _summary:
-                    print(f"    chief editor summary: {str(_summary)[:120]}")
-                _f = _ce.get("should_fix", [])
-                if isinstance(_f, list):
-                    for _item in _f[:2]:
-                        _txt = str(_item.get("issue", _item))[:100]
-                        print(f"    🔴 {_txt}")
-    except Exception as _e:
-        print(f"  [WARN] agent review skipped: {_e}")
+    _post_agent_review(app, content, chapter_no)
 
-    try:
-    # 3. 改稿检测（v0.8.0：从聚合 guard 报告下钻 _guards_raw 取 padding / anti_ai 子项）
-        _reports_dir = app.exports_root / "reports"
-        if _reports_dir.exists():
-            _fixes = []
-
-            def _load_sub(parent_guard: str, sub_guard: str):
-                _path = _reports_dir / f"chapter_{chapter_no:03d}_{parent_guard}_report.json"
-                if not _path.exists():
-                    return None
-                try:
-                    _data = json.loads(_path.read_text(encoding="utf-8"))
-                except Exception:
-                    return None
-                # v0.8.0: _guards_raw 经 GuardResult.to_dict() 包进 metrics；旧聚合 dict 仍在顶层
-                _subs = (_data.get("_guards_raw")
-                         or (_data.get("metrics") or {}).get("_guards_raw")
-                         or [])
-                for _sub in _subs:
-                    if isinstance(_sub, dict) and _sub.get("guard") == sub_guard:
-                        return _sub
-                return None
-
-            _padding = _load_sub("narrative_rhythm_guard", "padding_guard")
-            if _padding:
-                if _padding.get("padding_detected") and _padding.get("padding_evidence"):
-                    _ev = _padding["padding_evidence"]
-                    if isinstance(_ev, list):
-                        _fixes.extend([f"水文: {str(e)[:60]}" for e in _ev[:2]])
-
-            _ai = _load_sub("prose_authenticity_guard", "anti_ai_guard")
-            if _ai:
-                _findings = _ai.get("findings", [])
-                if isinstance(_findings, list):
-                    for _f_item in _findings:
-                        _msg = _f_item.get("message", "") if isinstance(_f_item, dict) else str(_f_item)
-                        if _msg and len(_msg) > 5:
-                            _fixes.append(_msg[:80])
-                elif isinstance(_findings, dict):
-                    for _k, _v in _findings.items():
-                        if isinstance(_v, (list, dict)) and len(str(_v)) > 5:
-                            _fixes.append(f"AI腔调: {_k}")
-
-            if _fixes:
-                print(f"  [改稿] 检测到{len(_fixes)}处可优化")
-                for _f in _fixes[:3]:
-                    print(f"    🟡 {_f}")
-    except Exception as _e:
-        print(f"  [WARN] fix detection skipped: {_e}")
+    # 3. 改稿检测
+    _post_detect_fixes(app, chapter_no)
 
     print(f"\n{'='*60}")
     print("chapter {} post-processing complete [OK] {} chars v{}".format(chapter_no, wc, result["version"]))

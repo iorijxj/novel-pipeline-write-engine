@@ -174,7 +174,7 @@ except Exception:
 | **Med #7** 静默吞错 | **✅ 已修复（记账）** | `GuardSummary.crashed_guards` 显式收集崩溃降级的 guard，save/load 往返，post 打印 `[WARN] N guard(s) 崩溃→降级 WARN`。fail-open 保留为设计，但失防现在可见。 |
 | **Med #8** conn3 泄漏 | **✅ 已修复** | `post.py` 改用 `with closing(connect_sqlite(...))`。 |
 | **Med #9** 两套失败哲学相反 | **✅ 已修复（文档）** | `docs/architecture.md` 设计决策 #7 明确 guards fail-open vs agents fail-closed 的取向、原因与分数方向。 |
-| **Med #10** 超长函数 | **◐ run_pre 已拆 / run_post 待办** | `run_pre` 750→153 行编排，抽出 22 个可独立测试小函数（FTS/genre/skeleton/prev-chapter/story-health/characters/reminders/context_pack/task-card/…），行为与 stdout 不变，303 测试绿。`run_post`(~400) 留作单独会话——动手前先补端到端特征测试再拆。 |
+| **Med #10** 超长函数 | **✅ 已修复** | `run_pre` 750→153 行（22 个小函数）；`run_post` 435→123 行（13 个小函数：state/fts/mental/genre/word-count/prev-brief/extra-context/orchestrator/texture/dedup/track/agent-review/fixes），嵌套 try 的 fail-open 隔离严格保留。先补端到端特征测试 `test_post_pipeline.py` 锁定行为再拆。行为与 stdout 不变，315 测试绿。 |
 | **Low #11** `== False` | **✅ 已修复** | `post.py` 改 `is False`；误导变量 `candidates`→`chapter_file`。 |
 | **Low #12** 死代码 | **✅ 已修复** | 删除 human_texture 块里被丢弃的 `_pipeline_genre` 重算。 |
 | **Low #13** 非确定 glob | **✅ 已修复** | `_find_chapter_file` 改 `sorted(glob(...))[0]`。 |
