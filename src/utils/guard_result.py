@@ -84,7 +84,7 @@ class GuardSummary:
     blocked_by: list[str] = field(default_factory=list)
     fts_health: dict = field(default_factory=dict)
     title_diff: Optional[str] = None
-    version: str = get_version()
+    version: str = field(default_factory=get_version)  # 实例化时求值，而非 import 期
 
     def compute(self):
         """Recompute derived fields from results."""

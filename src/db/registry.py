@@ -104,20 +104,13 @@ class Registry:
                 break
         self.save(data)
 
-    def get_next_slot_id(self) -> str:
-        """[DEPRECATED] 仅作兜底。新代码请用 SlotManager.ensure_slot_for_outline(title)
-        按大纲名命名 slot。本函数现在返回时间戳风格的 novel_<ts>，避免延续 slot_NNN 命名。
-        """
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return f"novel_{ts}"
-
     def is_initialized(self) -> bool:
-        """Check if workspace is properly initialized."""
+        """Check if workspace is properly initialized.
+
+        以"文件存在 + 结构含 active_slot/slots"判断；不强依赖 `version` 键
+        （旧版/手写 registry.json 可能没有 version，但仍是有效工作区）。
+        """
         if not self.registry_file.exists():
             return False
         data = self.load()
-        return (
-            "active_slot" in data
-            and "slots" in data
-            and "version" in data
-        )
+        return "active_slot" in data and "slots" in data

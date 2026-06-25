@@ -222,9 +222,9 @@ def _find_chapter_file(chapter_no: int, directory: Path) -> Path | None:
         f"第{_arabic_to_chinese_numeral(chapter_no)}章*.txt",
     ]
     for pattern in patterns:
-        candidates = list(directory.glob(pattern))
+        candidates = sorted(directory.glob(pattern))
         if candidates:
-            return candidates[0]
+            return candidates[0]  # sorted → 多文件命中时顺序确定，不依赖文件系统
     return None
 
 

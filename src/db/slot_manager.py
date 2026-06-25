@@ -198,15 +198,6 @@ class SlotManager:
             "created": True,
         }
 
-    def create_slot_auto(self, name: str, description: str = "") -> Dict:
-        """
-        Auto-create a new slot with auto-generated ID (timestamp-based fallback).
-        新代码应优先用 ensure_slot_for_outline(title) 按大纲名命名。
-        """
-        slot_id = self.registry.get_next_slot_id()
-        return self.create_slot(slot_id, ensure_registry=True,
-                                name=name, description=description)
-
     @staticmethod
     def _title_to_slug(title: str) -> str:
         """委托 src.utils.slug.title_to_slug（全仓库唯一来源）。"""

@@ -172,14 +172,15 @@ except Exception:
 | **Med #5** 分数方向反 | **真实** | `base_agent.py:46`「higher = more issues」；`orchestrator.py:113` 取均值，`post.py` 直接打印。 |
 | **Med #6** 去重交叉确认失效 | **真实** | `report_deduplicator.py:162` `len(sources)>=2 or avg_conf>0.7`；v0.8.0 后子检测身份丢失使 sources≈1。 |
 | **Med #7** 静默吞错 | **真实** | `voice_diversity_guard.py` 19 处 `except Exception`；叠加 fail-open + L2 永不 FAIL。 |
-| **Med #8** conn3 泄漏 | **真实** | `post.py:219` `close()` 在 try 内，异常即跳过。 |
+| **Med #8** conn3 泄漏 | **✅ 已修复** | `post.py` 改用 `with closing(connect_sqlite(...))`。 |
 | **Med #9** 两套失败哲学相反 | **真实** | guards fail-open vs `orchestrator` 崩溃→FAIL/score=100 fail-closed，无文档区分。 |
 | **Med #10** 超长函数 | **真实** | `run_pre`~750 / `run_post`~400 行。 |
-| **Low #11** `== False` | **真实** | `post.py:229/254`。 |
-| **Low #12** 死代码 | **真实** | `post.py:338-345` 重算 `_pipeline_genre`，`:345` 实际用 `selected_genre`，重算被丢弃。 |
-| **Low #13** 非确定 glob | **真实** | `_base.py` `_find_chapter_file` 返回 `glob(...)[0]`。 |
-| **Low #15** 弃用/初始化键 | **真实** | `registry.py:108` `get_next_slot_id` DEPRECATED 仍被 `create_slot_auto` 调；`:115` `is_initialized` 依赖 `version` 键。 |
+| **Low #11** `== False` | **✅ 已修复** | `post.py` 改 `is False`；误导变量 `candidates`→`chapter_file`。 |
+| **Low #12** 死代码 | **✅ 已修复** | 删除 human_texture 块里被丢弃的 `_pipeline_genre` 重算。 |
+| **Low #13** 非确定 glob | **✅ 已修复** | `_find_chapter_file` 改 `sorted(glob(...))[0]`。 |
+| **Low #14** dataclass 默认 | **✅ 已修复** | `GuardSummary.version` 改 `field(default_factory=get_version)`。 |
+| **Low #15** 弃用/初始化键 | **✅ 已修复** | 删除未用的 `create_slot_auto`/`get_next_slot_id`；`is_initialized` 不再依赖 `version` 键。 |
 | **Low #17** 标题正则 | **真实但被缓解** | `ingest.py:61` 下划线正则多半 None，但 `:68` 有正文 `# 第N章 标题` 兜底，标题未必退化到 stem。 |
-| **#14 / #16 / #18 / #19** | **接受报告结论** | 与所读代码一致，低优，未逐字节复验。 |
+| **#16 / #18 / #19** | **接受报告结论** | 与所读代码一致，低优，未逐字节复验。 |
 
 **净结论**：除 P0 已失效外，其余 High/Medium/Low 均在现行代码中成立。本轮不改代码，留待后续按报告「建议处理顺序」分批修复。

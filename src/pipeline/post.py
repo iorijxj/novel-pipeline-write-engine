@@ -6,6 +6,7 @@ deduplicated revision tasks, ingest, stage review, and full agent review.
 """
 
 import re, json, sys, os, sqlite3
+from contextlib import closing
 from pathlib import Path
 from datetime import datetime, timezone
 from version import get_version
@@ -147,8 +148,8 @@ def run_post(
     )
 
 
-    candidates = find_chapter_file_with_fallback(chapter_no, app)
-    if not candidates:
+    chapter_file = find_chapter_file_with_fallback(chapter_no, app)
+    if not chapter_file:
         raise RuntimeError(f"找不到第{chapter_no}章TXT (目录: {app.chapters_dir})")
 
     # 检查 pre 是否完成（允许 bootstrapped minimal state）
@@ -182,7 +183,7 @@ def run_post(
     except ImportError:
         pass
 
-    with open(candidates, 'r', encoding='utf-8') as f:
+    with open(chapter_file, 'r', encoding='utf-8') as f:
         content = _strip_selfcheck(f.read())
 
 # ── 1.2 精神状态触发词检测（仅当 slot 配置了 mental_triggers.json）──
@@ -211,12 +212,10 @@ def run_post(
 # v0.7.1 fix: fallback to novels table if pipeline_state lacks genre (e.g. pre ran before genre was set)
     if not _pipeline_genre:
         try:
-            conn3 = connect_sqlite(app.db_path)
-            cur3 = conn3.cursor()
-            row3 = cur3.execute("SELECT genre FROM novels WHERE slug=?", (app.novel_slug,)).fetchone()
-            if row3 and row3[0]:
-                _pipeline_genre = row3[0]
-            conn3.close()
+            with closing(connect_sqlite(app.db_path)) as conn3:
+                row3 = conn3.execute("SELECT genre FROM novels WHERE slug=?", (app.novel_slug,)).fetchone()
+                if row3 and row3[0]:
+                    _pipeline_genre = row3[0]
         except Exception:
             pass
     wc_pass, wc, eff_min = word_count_gate(
@@ -226,7 +225,7 @@ def run_post(
         genre=_pipeline_genre or None,
         app_inst=app,
     )
-    if wc_pass == False:
+    if wc_pass is False:
     # ── v0.4.5: 自动合并下一章 ──
         if args.merge_if_short:
             next_candidate = find_chapter_file_with_fallback(chapter_no + 1, app)
@@ -234,7 +233,7 @@ def run_post(
                 next_content = _strip_selfcheck(next_candidate.read_text(encoding='utf-8'))
                 merged = content.rstrip() + "\n\n---\n\n" + next_content
             # Save merged content
-                merged_path = candidates
+                merged_path = chapter_file
                 merged_path.write_text(merged, encoding='utf-8')
             # Rename next chapter as merged backup
                 bak = str(next_candidate) + ".merged"
@@ -251,7 +250,7 @@ def run_post(
                     genre=_pipeline_genre or None,
                     app_inst=app,
                 )
-                if wc_pass == False:
+                if wc_pass is False:
                     raise RuntimeError(f"合并后仍不足 {eff_min2} 字 (实际: {wc})")
             else:
                 raise RuntimeError(f"word count gate failed and chapter {chapter_no + 1} was not available to merge; short by {eff_min - wc} chars")
@@ -334,14 +333,6 @@ def run_post(
     # chapter_{N:03d}_texture_report.json 被 pre.py 和下章 trend 消费。
         try:
             from src.guards.human_texture import run_human_texture_guards
-        # Phase 4: 优先 pipeline_state 中的 genre（由 pre 从 DB 读取）
-            _state_genre = app.state_dir / f"chapter_{chapter_no:03d}_state.json"
-            _pipeline_genre = ""
-            if _state_genre.exists():
-                try:
-                    _ps = json.loads(_state_genre.read_text(encoding="utf-8"))
-                    _pipeline_genre = _ps.get("genre", "")
-                except Exception: pass
             genre = selected_genre
             pace_level = args.pace or quality_policy.get("pace_level", "normal")
             texture_report = run_human_texture_guards(
