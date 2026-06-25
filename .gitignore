@@ -28,7 +28,11 @@ config/license_server.json
 
 # Local privacy — NOT to be pushed to GitHub
 CLAUDE.md
-database/
+# database/ 存放权威 schema.sql + migrations（安装必需，必须随仓分发）。
+# 只忽略偶尔落到这里的本地 sqlite 文件。
+database/*.db
+database/*.sqlite
+database/*.sqlite3
 workspace/
 tmp/
 configs/scc_menu.json
