@@ -249,7 +249,12 @@ def _handle_project(args: dict, **kw) -> dict:
             from src.db.slot_manager import SlotManager
 
             mgr = SlotManager(PROSEFORGE_DIR)
-            mgr.create(args["slot_name"], args["title"])
+            mgr.create_slot(
+                args["slot_name"],
+                ensure_registry=True,
+                name=args["title"],
+                description=args["title"],
+            )
             return {
                 "status": "ok",
                 "message": f"小说 '{args['title']}' 创建完成",
@@ -259,7 +264,7 @@ def _handle_project(args: dict, **kw) -> dict:
         elif action == "list":
             from src.db.registry import Registry
 
-            reg = Registry(PROSEFORGE_DIR / "workspace")
+            reg = Registry(PROSEFORGE_DIR)
             slots = reg.list_slots()
             return {"status": "ok", "slots": slots}
 
