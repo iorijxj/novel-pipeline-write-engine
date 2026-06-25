@@ -1,5 +1,14 @@
 # ProseForge 修复计划
 
+> ## ✅ 已完成 / 已归档（2026-06-25）
+>
+> 本计划 6 个步骤已全部落实并随 master 推送（commit 6e4b3fc）：
+> - `database/schema.sql`（24 表 + 6 FTS）与 `database/migrations/`（0001/0002）已被 git 跟踪，clone 后可初始化 DB
+> - 步骤 2「补全表定义」实际已满足——所列 12 张表全部存在（11 张在 schema.sql，`arc_character_states` 在 migration 0001）
+> - `.gitignore` 已更新；`python -m pytest tests/` → 281 passed / 1 skipped
+>
+> 以下原始步骤保留为历史记录，**无需再执行**。
+
 ## 背景
 
 ProseForge 是一个公开项目，但存在以下问题导致无法从 git clone 后直接使用：
