@@ -256,6 +256,115 @@ def _post_build_extra_context(app, cfg, chapter_no, prev_brief, selected_genre):
     return extra_context
 
 
+def _post_run_orchestrator(content, chapter_no, orchestrator_mode, cfg, ce_reports_dir, prev_tail_text, prev_brief, extra_context):
+    """跑 guard orchestrator，写报告并打印；失败降级返回空报告（保留内层 try）。"""
+    orch_report = {"warnings": [], "executed_guards": [], "warning_count": 0}
+    try:
+        from src.pipeline.guard_orchestrator import run_orchestrated
+        orch_report = run_orchestrated(
+            content, chapter_no, mode=orchestrator_mode,
+            config=cfg, reports_dir=str(ce_reports_dir),
+            prev_tail=prev_tail_text, prev_brief=prev_brief,
+            extra_context=extra_context)
+        orch_path = ce_reports_dir / f"chapter_{chapter_no:03d}_orchestrator_report.json"
+        orch_path.write_text(json.dumps(orch_report, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"  [OK] orchestrator ({orchestrator_mode}): {len(orch_report.get('executed_guards', []))} guards, {orch_report.get('warning_count', 0)} warnings")
+        if orch_report.get("crashed_guards"):
+            print(f"  [WARN] {len(orch_report['crashed_guards'])} guard(s) 崩溃→降级 WARN (fail-open，未设防): {orch_report['crashed_guards']}")
+        if orch_report.get("blocked_by"):
+            print(f"  [BLOCK] compliance: {orch_report['blocked_by']}")
+        if orch_report.get("fail_count", 0) > 0:
+            failed = orch_report.get("failed_guards", orch_report.get("executed_guards", []))
+            print(f"  [WARN] {orch_report['fail_count']} guard(s) FAIL (level 1/2) — ingest 继续但需复查")
+    except Exception as e:
+        print(f"  [FAIL] orchestrator: {e} — 跳过门禁但 human_texture/dedup/ingest 继续")
+        orch_report = {"warnings": [], "executed_guards": [], "warning_count": 0}
+    return orch_report
+
+
+def _post_run_human_texture(content, chapter_no, selected_genre, args, quality_policy, ce_reports_dir):
+    """human_texture 质量层 + 趋势对比，写 texture 报告并打印（保留内层 try）。"""
+    try:
+        from src.guards.human_texture import run_human_texture_guards
+        genre = selected_genre
+        pace_level = args.pace or quality_policy.get("pace_level", "normal")
+        texture_report = run_human_texture_guards(
+            content, chapter_no,
+            project_root=str(_PROJECT_ROOT),
+            genre=genre,
+            pace_level=pace_level,
+        )
+        texture_path = ce_reports_dir / f"chapter_{chapter_no:03d}_texture_report.json"
+        texture_path.write_text(json.dumps(texture_report, ensure_ascii=False, indent=2), encoding="utf-8")
+        scores = texture_report.get("scores", {})
+        texture_status = texture_report.get("status", "?")
+        print(f"  [OK] human_texture: {len(scores)} guards, status={texture_status}")
+        for gname, score in sorted(scores.items()):
+            icon = "PASS" if score >= 70 else ("WARN" if score >= 55 else "FAIL")
+            short = gname.replace("_guard", "").replace("_", " ")
+            print(f"    {icon} {short:25s} {score}/100")
+        if texture_status == "FAIL":
+            print("  [BLOCK] human_texture quality gate failed")
+
+    # ── 4.1 texture 趋势对比 ──
+        _trend = {"direction": "first", "delta": "", "deltas": {}}
+        _prev_tex_path = ce_reports_dir / f"chapter_{chapter_no - 1:03d}_texture_report.json"
+        if _prev_tex_path.exists():
+            try:
+                _prev_tex = json.loads(_prev_tex_path.read_text(encoding="utf-8"))
+                _prev_scores = _prev_tex.get("scores", {})
+                _deltas = {}
+                _up = _down = _same = 0
+                for _gname, _score in scores.items():
+                    _prev = _prev_scores.get(_gname)
+                    if _prev is not None and isinstance(_prev, (int, float)):
+                        _d = _score - _prev
+                        _deltas[_gname] = _d
+                        if _d > 3: _up += 1
+                        elif _d < -3: _down += 1
+                        else: _same += 1
+                if _deltas:
+                    _avg_delta = sum(_deltas.values()) / len(_deltas) if _deltas else 0
+                    _trend["direction"] = "up" if _up > _down else ("down" if _down > _up else "stable")
+                    _trend["delta"] = f"{_avg_delta:+.1f}"
+                    _trend["deltas"] = _deltas
+                # Rewrite texture report with trend data
+                    texture_report["trend"] = _trend
+                    texture_path.write_text(json.dumps(texture_report, ensure_ascii=False, indent=2), encoding="utf-8")
+                    _dir_icon = {"up": "^", "down": "v", "stable": "="}.get(_trend["direction"], "")
+                    _changed = {k: v for k, v in _deltas.items() if abs(v) > 3}
+                    if _changed:
+                        _trend_parts = [f"{k.replace('_guard','').replace('_',' ')}:{_dir_icon}{v:+d}" for k, v in sorted(_changed.items(), key=lambda x: -abs(x[1]))[:4]]
+                        print("  [TREND] vs chapter {}: {}".format(chapter_no - 1, " | ".join(_trend_parts)))
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"  [WARN] human_texture skipped: {e}")
+
+
+def _post_dedup_tasks(orch_report, quality_policy, ce_reports_dir, chapter_no):
+    """去重 + Top 修改任务，写 deduplicated 报告并打印（保留内层 try）。"""
+    try:
+        if quality_policy.get("deduplicate_warnings", True) and orch_report:
+            from src.pipeline.report_deduplicator import deduplicate_warnings, get_top_revision_tasks
+            merged = deduplicate_warnings(
+                orch_report.get("warnings", []),
+                quality_policy.get("min_warning_confidence", 0.55))
+            tasks = get_top_revision_tasks(
+                merged, quality_policy.get("max_final_revision_tasks", 5))
+            dedup_path = ce_reports_dir / f"chapter_{chapter_no:03d}_deduplicated_report.json"
+            dedup_path.write_text(json.dumps({
+                "version": get_version(), "merged_issues": merged,
+                "top_revision_tasks": tasks,
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"  [OK] deduplicated: {len(merged)} issues → {len(tasks)} tasks")
+            if tasks:
+                for t in tasks[:3]:
+                    print(f"    {t['rank']}. {t['issue']}")
+    except Exception as e:
+        print(f"  [WARN] dedup skipped: {e}")
+
+
 def run_post(
     chapter_no,
     chapter_type="normal",
@@ -344,114 +453,15 @@ def run_post(
     selected_genre = _pipeline_genre or args.genre or cfg.get("default_genre", "default")
     extra_context = _post_build_extra_context(app, cfg, chapter_no, prev_brief, selected_genre)
 
-    # 空安全兜底：orchestrator 失败时下游 human_texture/dedup 仍可安全引用
+    # 空安全兜底：orchestrator/human_texture/dedup 各自带内层 try——
+    # 单点失败不级联；外层 try 仅兜底意外错误。
     orch_report = {"warnings": [], "executed_guards": [], "warning_count": 0}
     try:
-        # run_orchestrated 单独 try——它失败不再级联跳过 human_texture/dedup
-        try:
-            from src.pipeline.guard_orchestrator import run_orchestrated
-            orch_report = run_orchestrated(
-                content, chapter_no, mode=orchestrator_mode,
-                config=cfg, reports_dir=str(ce_reports_dir),
-                prev_tail=prev_tail_text, prev_brief=prev_brief,
-                extra_context=extra_context)
-            orch_path = ce_reports_dir / f"chapter_{chapter_no:03d}_orchestrator_report.json"
-            orch_path.write_text(json.dumps(orch_report, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"  [OK] orchestrator ({orchestrator_mode}): {len(orch_report.get('executed_guards', []))} guards, {orch_report.get('warning_count', 0)} warnings")
-            if orch_report.get("crashed_guards"):
-                print(f"  [WARN] {len(orch_report['crashed_guards'])} guard(s) 崩溃→降级 WARN (fail-open，未设防): {orch_report['crashed_guards']}")
-            if orch_report.get("blocked_by"):
-                print(f"  [BLOCK] compliance: {orch_report['blocked_by']}")
-            if orch_report.get("fail_count", 0) > 0:
-                failed = orch_report.get("failed_guards", orch_report.get("executed_guards", []))
-                print(f"  [WARN] {orch_report['fail_count']} guard(s) FAIL (level 1/2) — ingest 继续但需复查")
-        except Exception as e:
-            print(f"  [FAIL] orchestrator: {e} — 跳过门禁但 human_texture/dedup/ingest 继续")
-            orch_report = {"warnings": [], "executed_guards": [], "warning_count": 0}
-
-    # ── STEP 7.7: Human Texture Quality Layer (人工味质量层) ──
-    # NOTE: punctuation_guard 由 narrative_rhythm_guard (L2 aggregator) 在
-    # run_orchestrated 中统一执行，findings 已经在 orch_report 里——
-    # 这里不再单独跑一遍打印。human_texture 仍走独立路径，因为它的
-    # chapter_{N:03d}_texture_report.json 被 pre.py 和下章 trend 消费。
-        try:
-            from src.guards.human_texture import run_human_texture_guards
-            genre = selected_genre
-            pace_level = args.pace or quality_policy.get("pace_level", "normal")
-            texture_report = run_human_texture_guards(
-                content, chapter_no,
-                project_root=str(_PROJECT_ROOT),
-                genre=genre,
-                pace_level=pace_level,
-            )
-            texture_path = ce_reports_dir / f"chapter_{chapter_no:03d}_texture_report.json"
-            texture_path.write_text(json.dumps(texture_report, ensure_ascii=False, indent=2), encoding="utf-8")
-            scores = texture_report.get("scores", {})
-            texture_status = texture_report.get("status", "?")
-            print(f"  [OK] human_texture: {len(scores)} guards, status={texture_status}")
-            for gname, score in sorted(scores.items()):
-                icon = "PASS" if score >= 70 else ("WARN" if score >= 55 else "FAIL")
-                short = gname.replace("_guard", "").replace("_", " ")
-                print(f"    {icon} {short:25s} {score}/100")
-            if texture_status == "FAIL":
-                print("  [BLOCK] human_texture quality gate failed")
-
-        # ── 4.1 texture 趋势对比 ──
-            _trend = {"direction": "first", "delta": "", "deltas": {}}
-            _prev_tex_path = ce_reports_dir / f"chapter_{chapter_no - 1:03d}_texture_report.json"
-            if _prev_tex_path.exists():
-                try:
-                    _prev_tex = json.loads(_prev_tex_path.read_text(encoding="utf-8"))
-                    _prev_scores = _prev_tex.get("scores", {})
-                    _deltas = {}
-                    _up = _down = _same = 0
-                    for _gname, _score in scores.items():
-                        _prev = _prev_scores.get(_gname)
-                        if _prev is not None and isinstance(_prev, (int, float)):
-                            _d = _score - _prev
-                            _deltas[_gname] = _d
-                            if _d > 3: _up += 1
-                            elif _d < -3: _down += 1
-                            else: _same += 1
-                    if _deltas:
-                        _avg_delta = sum(_deltas.values()) / len(_deltas) if _deltas else 0
-                        _trend["direction"] = "up" if _up > _down else ("down" if _down > _up else "stable")
-                        _trend["delta"] = f"{_avg_delta:+.1f}"
-                        _trend["deltas"] = _deltas
-                    # Rewrite texture report with trend data
-                        texture_report["trend"] = _trend
-                        texture_path.write_text(json.dumps(texture_report, ensure_ascii=False, indent=2), encoding="utf-8")
-                        _dir_icon = {"up": "^", "down": "v", "stable": "="}.get(_trend["direction"], "")
-                        _changed = {k: v for k, v in _deltas.items() if abs(v) > 3}
-                        if _changed:
-                            _trend_parts = [f"{k.replace('_guard','').replace('_',' ')}:{_dir_icon}{v:+d}" for k, v in sorted(_changed.items(), key=lambda x: -abs(x[1]))[:4]]
-                            print("  [TREND] vs chapter {}: {}".format(chapter_no - 1, " | ".join(_trend_parts)))
-                except Exception:
-                    pass
-        except Exception as e:
-            print(f"  [WARN] human_texture skipped: {e}")
-
-
-    # ── 去重 + Top 5 修改任务 ──
-        try:
-            if quality_policy.get("deduplicate_warnings", True) and orch_report:
-                from src.pipeline.report_deduplicator import deduplicate_warnings, get_top_revision_tasks
-                merged = deduplicate_warnings(
-                    orch_report.get("warnings", []),
-                    quality_policy.get("min_warning_confidence", 0.55))
-                tasks = get_top_revision_tasks(
-                    merged, quality_policy.get("max_final_revision_tasks", 5))
-                dedup_path = ce_reports_dir / f"chapter_{chapter_no:03d}_deduplicated_report.json"
-                dedup_path.write_text(json.dumps({
-                    "version": get_version(), "merged_issues": merged,
-                    "top_revision_tasks": tasks,
-                }, ensure_ascii=False, indent=2), encoding="utf-8")
-                print(f"  [OK] deduplicated: {len(merged)} issues → {len(tasks)} tasks")
-                if tasks:
-                    for t in tasks[:3]:
-                        print(f"    {t['rank']}. {t['issue']}")
-        except Exception as e:
-            print(f"  [WARN] dedup skipped: {e}")
+        orch_report = _post_run_orchestrator(
+            content, chapter_no, orchestrator_mode, cfg, ce_reports_dir,
+            prev_tail_text, prev_brief, extra_context)
+        _post_run_human_texture(content, chapter_no, selected_genre, args, quality_policy, ce_reports_dir)
+        _post_dedup_tasks(orch_report, quality_policy, ce_reports_dir, chapter_no)
     except Exception as e:
         # 安全网：human_texture/dedup 各自已有独立 try，此处仅兜底意外错误
         print(f"  [WARN] post quality layer 异常: {e}")
