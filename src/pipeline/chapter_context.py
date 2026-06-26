@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from src.pipeline._base import connect, now, _get_novel_id
+from src.utils.character_mentions import find_character_mention_positions
 
 
 # ============================================================
@@ -102,9 +103,14 @@ _ITEM_LEXICON = [
 ]
 
 
-def _extract_character_locations(content, char_names):
+def _build_character_mentions(content, char_names):
+    return find_character_mention_positions(content, char_names or [])
+
+
+def _extract_character_locations(content, char_names, mention_positions=None):
     """Extract last-known location per character from chapter text."""
     locs = {}
+    mention_positions = mention_positions or _build_character_mentions(content, char_names)
     LOC_PATTERNS = [
         r"(?:回到|来到|走到|跑到|行至|赶往|前往|进入|踏入|步入|迈入"
         r"|坐在|站在|躺在|靠在|蹲在|藏在|住在|立在|待在|留在|等在|跪在"
@@ -117,11 +123,10 @@ def _extract_character_locations(content, char_names):
     ]
 
     for name in char_names:
-        if name not in content:
+        positions = mention_positions.get(name, [])
+        if not positions:
             continue
-        last_pos = content.rfind(name)
-        if last_pos < 0:
-            continue
+        last_pos = positions[-1]
         window = content[last_pos:last_pos + 60]
         for pat in LOC_PATTERNS:
             m = re.search(pat, window)
@@ -191,15 +196,15 @@ _EMOTION_WORDS = [
 ]
 
 
-def _extract_emotional_states(content, char_names):
+def _extract_emotional_states(content, char_names, mention_positions=None):
     """Find last emotion word near each character."""
     states = {}
+    mention_positions = mention_positions or _build_character_mentions(content, char_names)
     for name in char_names:
-        if name not in content:
+        positions = mention_positions.get(name, [])
+        if not positions:
             continue
-        last_pos = content.rfind(name)
-        if last_pos < 0:
-            continue
+        last_pos = positions[-1]
         window = content[last_pos:last_pos + 80]
         for ew in _EMOTION_WORDS:
             if ew in window:
@@ -237,15 +242,15 @@ _PHYSICAL_STATE_KEYWORDS = {
 }
 
 
-def _extract_character_physical_states(content, char_names):
+def _extract_character_physical_states(content, char_names, mention_positions=None):
     """Extract physical state per character from chapter text."""
     states = {}
+    mention_positions = mention_positions or _build_character_mentions(content, char_names)
     for name in char_names:
-        if name not in content:
+        positions = mention_positions.get(name, [])
+        if not positions:
             continue
-        last_pos = content.rfind(name)
-        if last_pos < 0:
-            continue
+        last_pos = positions[-1]
         window = content[last_pos:last_pos + 100]
         for state_label, keywords in _PHYSICAL_STATE_KEYWORDS.items():
             for kw in keywords:
@@ -266,13 +271,12 @@ _DECISION_MARKERS = [
 ]
 
 
-def _extract_key_decisions(content, char_names):
+def _extract_key_decisions(content, char_names, mention_positions=None):
     """Find key decisions made by characters in this chapter."""
     decisions = []
+    mention_positions = mention_positions or _build_character_mentions(content, char_names)
     for name in char_names:
-        if name not in content:
-            continue
-        for pos in [m.start() for m in re.finditer(re.escape(name), content)]:
+        for pos in mention_positions.get(name, []):
             window_start = max(0, pos - 20)
             window_end = min(len(content), pos + 80)
             window = content[window_start:window_end]
@@ -288,7 +292,7 @@ def _extract_key_decisions(content, char_names):
     return decisions[:10]
 
 
-def _extract_emotional_states_enhanced(content, char_names):
+def _extract_emotional_states_enhanced(content, char_names, mention_positions=None):
     """Extract emotional states with intensity and transition detection."""
     _INTENSIFIERS = {
         5: ["极度", "透顶", "到了极点", "无法承受", "崩溃"],
@@ -298,12 +302,12 @@ def _extract_emotional_states_enhanced(content, char_names):
         1: ["稍", "略带", "浅淡", "隐约"],
     }
     states = {}
+    mention_positions = mention_positions or _build_character_mentions(content, char_names)
     for name in char_names:
-        if name not in content:
+        positions = mention_positions.get(name, [])
+        if not positions:
             continue
-        last_pos = content.rfind(name)
-        if last_pos < 0:
-            continue
+        last_pos = positions[-1]
         window = content[last_pos:last_pos + 80]
         best_emotion = None
         best_intensity = 1
@@ -324,13 +328,14 @@ def _extract_emotional_states_enhanced(content, char_names):
     return states
 
 
-def _extract_active_relationships(content, char_names):
+def _extract_active_relationships(content, char_names, mention_positions=None):
     """Find which characters interact in this chapter."""
     rels = []
+    mention_positions = mention_positions or _build_character_mentions(content, char_names)
     for i, n1 in enumerate(char_names):
         for n2 in char_names[i + 1:]:
-            pos1 = [m.start() for m in re.finditer(re.escape(n1), content)]
-            pos2_set = set(m.start() for m in re.finditer(re.escape(n2), content))
+            pos1 = mention_positions.get(n1, [])
+            pos2_set = set(mention_positions.get(n2, []))
             for p1 in pos1:
                 for p2 in pos2_set:
                     if abs(p1 - p2) <= 200:
@@ -441,16 +446,18 @@ def generate_chapter_context(chapter_no, title, content, wc, nid, ch_id, char_na
         cur.execute("SELECT name FROM characters WHERE novel_id=?", (nid,))
         char_names = [r[0] for r in cur.fetchall()]
 
-    char_locs = _extract_character_locations(content, char_names)
+    mention_positions = _build_character_mentions(content, char_names)
+
+    char_locs = _extract_character_locations(content, char_names, mention_positions=mention_positions)
     items = _extract_active_items(content)
     threads = _extract_unresolved_threads(content)
-    emotions = _extract_emotional_states(content, char_names)
+    emotions = _extract_emotional_states(content, char_names, mention_positions=mention_positions)
     world = _extract_world_state(content)
 
-    phys_states = _extract_character_physical_states(content, char_names)
-    emotions_enh = _extract_emotional_states_enhanced(content, char_names)
-    key_decisions = _extract_key_decisions(content, char_names)
-    active_rels = _extract_active_relationships(content, char_names)
+    phys_states = _extract_character_physical_states(content, char_names, mention_positions=mention_positions)
+    emotions_enh = _extract_emotional_states_enhanced(content, char_names, mention_positions=mention_positions)
+    key_decisions = _extract_key_decisions(content, char_names, mention_positions=mention_positions)
+    active_rels = _extract_active_relationships(content, char_names, mention_positions=mention_positions)
 
     ending_state = ""
     hooks_for_next = ""

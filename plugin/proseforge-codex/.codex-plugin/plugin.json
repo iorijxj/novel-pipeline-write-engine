@@ -1,6 +1,6 @@
 {
   "name": "proseforge-codex",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Codex plugin wrapper for the HermesForgeN novel workflow.",
   "author": {
     "name": "HermesForgeN Team"
@@ -16,7 +16,7 @@
   "interface": {
     "displayName": "HermesForgeN Codex",
     "shortDescription": "Two-entry Codex wrapper for Novel Forge.",
-    "longDescription": "Adds two focused Codex workflow entries that map to the Novel Forge pipeline and project-management flows without introducing MCP.",
+    "longDescription": "Adds two focused Codex workflow entries that map to the ProseForge pipeline and project-management flows without introducing MCP. The wrappers execute the live repo implementation, so pipeline behavior tracks the current core code.",
     "developerName": "HermesForgeN Team",
     "websiteURL": "https://github.com/remacheybn408-boop/ProseForge",
     "privacyPolicyURL": "https://github.com/remacheybn408-boop/ProseForge/blob/main/plugin/proseforge-codex/docs/PRIVACY.md",

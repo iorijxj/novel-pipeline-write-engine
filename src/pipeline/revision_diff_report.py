@@ -63,6 +63,8 @@ def compute_task_results(tasks: list, changed_ranges: list,
     RESOLVED（问题已消失）/ ATTEMPTED（仍在但有改动）/ SKIPPED（无改动）；
     否则退回二元 APPLIED/SKIPPED（向后兼容）。
     """
+    # verification only carries deterministic guard-category regression state.
+    # Semantic fidelity, when available, is handled separately via preservation.
     range_by_task = {}
     for r in changed_ranges:
         tid = r.get("task_id", "")
@@ -170,6 +172,7 @@ def generate_diff_report(source_text: str, revised_text: str,
     """生成完整 diff report。
 
     verification = guard 复跑验证块；preservation = 语义保全评估块（均可选，见 rewrite.py）。"""
+    # Keep verification and preservation semantically separate in the report.
     source_paras = split_paragraphs(source_text)
     revised_paras = split_paragraphs(revised_text)
 
@@ -198,5 +201,4 @@ def generate_diff_report(source_text: str, revised_text: str,
         "preservation": preservation or {"available": False},
         "recommendation": recommendation,
     }
-
 

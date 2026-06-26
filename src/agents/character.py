@@ -9,6 +9,7 @@ from typing import Optional
 
 from .base_agent import BaseAgent
 from src.db._conn import connect_sqlite
+from src.utils.character_mentions import find_character_mention_positions
 
 LQ = "\u201c"
 RQ = "\u201d"
@@ -197,6 +198,10 @@ class CharacterAgent(BaseAgent):
         cards = self._load_character_psychologies()
         if not cards:
             return self._component_result(0, "PASS", [])
+        mention_positions = find_character_mention_positions(
+            content,
+            [card.get("name", "") for card in cards if card.get("name")],
+        )
 
         for card in cards:
             name = card.get("name", "?")
@@ -239,7 +244,11 @@ class CharacterAgent(BaseAgent):
                             )
                             score -= 15
 
-                char_text = self._get_char_text_segments(content, name)
+                char_text = self._get_char_text_segments(
+                    content,
+                    name,
+                    mention_positions=mention_positions,
+                )
                 extreme_score = self._calc_emotion_intensity(char_text)
                 expected_score = severity * 10
                 deviation = abs(extreme_score - expected_score)
@@ -329,17 +338,23 @@ class CharacterAgent(BaseAgent):
         return total
 
     @staticmethod
-    def _get_char_text_segments(content: str, char_name: str, window: int = 200) -> str:
+    def _get_char_text_segments(
+        content: str,
+        char_name: str,
+        window: int = 200,
+        mention_positions: dict[str, list[int]] | None = None,
+        all_names: list[str] | None = None,
+    ) -> str:
         segments = []
-        pos = 0
-        while True:
-            idx = content.find(char_name, pos)
-            if idx == -1:
-                break
+        if mention_positions is None:
+            names = list(all_names or [char_name])
+            if char_name not in names:
+                names.append(char_name)
+            mention_positions = find_character_mention_positions(content, names)
+        for idx in mention_positions.get(char_name, []):
             start = max(0, idx - window)
             end = min(len(content), idx + len(char_name) + window)
             segments.append(content[start:end])
-            pos = end
         return " ".join(segments)
 
     @staticmethod

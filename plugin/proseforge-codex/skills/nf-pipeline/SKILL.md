@@ -5,7 +5,7 @@ description: Use when running ProseForge chapter or volume pipeline actions such
 
 # nf_pipeline
 
-Use this skill when the user wants to run the Novel Forge writing pipeline from
+Use this skill when the user wants to run the ProseForge writing pipeline from
 Codex and the task maps to one of these actions:
 
 - `pre`
@@ -29,8 +29,16 @@ python <plugin-root>/scripts/nf_pipeline.py --action <action> ...
 - `review`: run the multi-agent review flow.
 - `batch`: run `post` for a chapter range.
 - `volume`: build the volume-level summary.
-- `rewrite`: 读 post 去重报告，产「改写卡」(outputs/rewrite_cards/) + revision_tasks.json，由 Agent 改写并写 chapter_NNN_revised.txt。内核不调 LLM。
-- `accept`: 原稿 vs revised 出 diff + recommendation；加 `--ingest` 审核通过则入库（追加快照，不覆盖）。
+- `rewrite`: read the post deduplicated report, generate the rewrite card under `outputs/rewrite_cards/` plus `revision_tasks.json`, and let an agent produce `chapter_NNN_revised.txt`. The kernel does not call an LLM here.
+- `accept`: compare source vs revised, produce diff + recommendation, and optionally ingest with `--ingest` after review passes.
+
+## Current behavior notes
+
+- These wrappers call the live repo code under `src/`, not a copied pipeline implementation.
+- `accept` may return both `verification` and `preservation`.
+- `verification` is only deterministic guard-category regression output such as `resolved`, `persisted`, and `regressed`.
+- `verification` does not imply semantic fidelity.
+- `preservation` is the separate semantic-preservation evaluation block when the repo enables that flow.
 
 ## Required arguments
 
@@ -40,12 +48,12 @@ python <plugin-root>/scripts/nf_pipeline.py --action <action> ...
 - `batch`: `--slug --title --vol-no --from-ch --to-ch`
 - `volume`: `--slug --title --vol-no`
 - `rewrite`: `--slug --title --vol-no --chapter-no`
-- `accept`: `--slug --title --vol-no --chapter-no` (`--ingest` 可选)
+- `accept`: `--slug --title --vol-no --chapter-no` (`--ingest` optional)
 
 ## Optional arguments
 
 - `--chapter-type normal|key|climax`
-- `--mode light|full` for `review` — light 跑 3 个 agent（continuity/prose/plot），full 跑 6 个（额外加 character/reader/detail）；两者审稿阈值相同，区别只在覆盖范围
+- `--mode light|full` for `review`
 - `--project-root <repo-root>` or `PROSEFORGE_PROJECT_ROOT=<repo-root>` when running outside the repository
 - `--config-path <path>` when the config is not the default location
 
