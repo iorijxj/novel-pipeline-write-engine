@@ -139,6 +139,41 @@ def test_run_accept_diff_only(rw_env):
     assert rw_env["chapter_file"].read_text(encoding="utf-8") == _CHAPTER_TEXT
 
 
+def test_run_accept_records_out_of_range_change(rw_env):
+    app = rw_env["app"]
+    run_rewrite(1, novel_slug=app.novel_slug, novel_title="Demo", volume_no=1, context=app)
+
+    # 改最后一段（任务区间外也好、章节尺度也好，全文 diff 都该记到）
+    revised = _CHAPTER_TEXT.replace(
+        "他握紧拳头，知道明天会有更难的对白等着他。",
+        "他攥着那枚铜钥匙，把信塞进怀里，转身走进雨里。")
+    (rw_env["chapter_file"].parent / "chapter_001_revised.txt").write_text(revised, encoding="utf-8")
+
+    run_accept(1, novel_slug=app.novel_slug, novel_title="Demo", volume_no=1,
+               ingest=False, context=app)
+
+    log = json.loads((rw_env["reports_dir"] / "chapter_001_rewrite_log.json").read_text(encoding="utf-8"))
+    assert log["changed_ranges"]                       # 全文扫描捕获到改动
+    assert any(r["change_type"] in ("replace", "insert", "delete")
+               for r in log["changed_ranges"])
+
+
+def test_run_accept_no_op_blocks_ingest(rw_env):
+    app = rw_env["app"]
+    run_rewrite(1, novel_slug=app.novel_slug, novel_title="Demo", volume_no=1, context=app)
+
+    # 用户直接复制了原文（空改）
+    (rw_env["chapter_file"].parent / "chapter_001_revised.txt").write_text(
+        _CHAPTER_TEXT, encoding="utf-8")
+
+    result = run_accept(1, novel_slug=app.novel_slug, novel_title="Demo", volume_no=1,
+                        ingest=True, context=app)
+
+    assert result["recommendation"] == "NO_CHANGE_DETECTED"
+    assert result["ingested"] is False
+    assert "ingest_skipped_reason" in result
+
+
 def test_run_accept_missing_revised(rw_env):
     result = run_accept(1, novel_slug=rw_env["slug"], novel_title="Demo",
                         volume_no=1, ingest=False, context=rw_env["app"])

@@ -10,6 +10,7 @@
   chapter_versions 快照，永不覆盖原稿）。
 """
 
+import difflib
 import json
 from pathlib import Path
 
@@ -176,30 +177,23 @@ def run_rewrite(
     }
 
 
-def _compute_changed_ranges(source_text, revised_text, tasks) -> list:
-    """段落级定位：任务范围内有段落变化即记为 APPLIED。"""
+def _compute_changed_ranges(source_text, revised_text) -> list:
+    """全文段落对齐：difflib 扫出**所有**变动段落块（含任务区间外），不再漏记。
+
+    任务已不带段落范围（章节尺度），故这里产出的是文档级改动图，供人审与验证参考，
+    不再按 task_id 归属。"""
     src = split_paragraphs(source_text)
     rev = split_paragraphs(revised_text)
+    sm = difflib.SequenceMatcher(None, src, rev)
     changed = []
-    for task in tasks:
-        rng = task.get("target_range", {})
-        start = rng.get("paragraph_start", 1)
-        end = rng.get("paragraph_end", start)
-        touched = False
-        for i in range(start, end + 1):
-            s = src[i - 1] if 1 <= i <= len(src) else ""
-            r = rev[i - 1] if 1 <= i <= len(rev) else ""
-            if s != r:
-                touched = True
-                break
-        if touched:
-            changed.append({
-                "task_id": task["task_id"],
-                "paragraph_start": start,
-                "paragraph_end": end,
-                "change_type": "rewrite_range",
-                "reason": task.get("instruction", "")[:40],
-            })
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        changed.append({
+            "change_type": tag,                        # replace / insert / delete
+            "source_paragraphs": [i1 + 1, i2] if i2 > i1 else [],
+            "revised_paragraphs": [j1 + 1, j2] if j2 > j1 else [],
+        })
     return changed
 
 
@@ -245,7 +239,7 @@ def run_accept(
         except (OSError, json.JSONDecodeError):
             tasks = []
 
-    changed_ranges = _compute_changed_ranges(source_text, revised_text, tasks)
+    changed_ranges = _compute_changed_ranges(source_text, revised_text)
     rewrite_log = {
         "version": get_version(),
         "chapter_no": chapter_no,
@@ -273,8 +267,9 @@ def run_accept(
     }
 
     if ingest:
-        if diff["recommendation"] == "REVISION_REJECTED":
-            result["ingest_skipped_reason"] = "recommendation=REVISION_REJECTED，未入库。"
+        # 空改拦截 + 拒绝拦截：revised≈原文（NO_CHANGE_DETECTED）或被拒，一律不入库。
+        if diff["recommendation"] in ("REVISION_REJECTED", "NO_CHANGE_DETECTED"):
+            result["ingest_skipped_reason"] = f"recommendation={diff['recommendation']}，未入库。"
             return result
         # 提升 revised 为 canonical；旧稿已在 post 阶段进 chapter_versions 快照。
         chapter_file.write_text(revised_text, encoding="utf-8")
