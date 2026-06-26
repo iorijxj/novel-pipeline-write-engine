@@ -97,7 +97,7 @@ uv pip install pytest
 python -m pytest tests/ -x -q
 ```
 
-预期输出：全部测试通过（~280 项）。
+预期输出：全部测试通过（365 项）。
 
 ---
 
@@ -241,8 +241,40 @@ Hermes / Codex / Claude
 
 ### 5. 改写层
 
-改写以 `nf_pipeline` 的 `rewrite` + `accept` 两个 action 接回流水线，**内核不调 LLM**：`rewrite` 读 post 的去重报告产「改写卡」，Agent 据卡只改问题段写 `chapter_NNN_revised.txt`，`accept` 出 diff 并在 `--ingest` 时入库。原则不变：改稿是增量产物，只向 `chapter_versions` 追加快照，不覆盖原稿。详见 [REVISION_LOOP.md](docs/REVISION_LOOP.md)。
+改写以 `nf_pipeline` 的 `rewrite` + `accept` 两个 action 接回流水线，**内核不调 LLM**。
 
+流程：
+
+```text
+run_rewrite ── 读 post 去重报告 → 产「改写卡」+ revision_tasks.json
+    │          + 语义保全契约（开放承诺/伏笔/角色关系/canon 硬事实/结尾钩）
+    │          + host 回执模板（让改写方知道"什么必须留住"）
+    │
+    ▼  [Agent host 改写 → 写 chapter_NNN_revised.txt]
+    │
+run_accept ── 原文 vs revised 做字级 difflib diff
+    │          + 全文改动图（段落对齐，任务区间外也捕获）
+    │          + guard 复跑验证：按类别比对 resolved / persisted / regressed
+    │          + 语义保全评估：词级预检 + host 回执 → broken / preserved
+    │          + 多信号推荐：空改(NO_CHANGE) / 拒绝(REJECTED) / 仔细复核 / 可入库
+    │
+    └── ingest 门禁 —— recommendation 为 REJECTED / NO_CHANGE 时直接跳过入库
+```
+
+关键设计：
+
+- **内核零 LLM**：内核只做确定性规则（契约生成、difflib 对比、词级预检、guard 编排），不做语义判断。
+- **语义保全**（`semantic_contract.py`）：从 DB 提取 4 维契约（读者承诺/活跃伏笔/同章角色关系/canon 硬事实），
+  `run_rewrite` 产请求卡，host LLM 写回执，`run_accept` 读回执 + 词级预检 → broken/preserved。
+  可设 `semantic_preservation.enforce` 为 true 硬阻入库。
+- **guard 复跑**：`run_accept` 在 revised 上重跑 guard orchestrator，类别级比对原问题是否真正消失（resolved），
+  还是仍在（persisted），或引入了新类别（regressed）。regressed 导致拒绝。
+- **空改拦截**：字级改动量 ratio ≤ 0.001 自动判 NO_CHANGE_DETECTED，不入库。
+- **差异化 guidance**：任务类别复用 report_deduplicator.ISSUE_CATEGORIES 标签，每类 task 带独立的 must_keep/avoid
+  （如 ADD_CONCRETE_DETAILS 禁止空喊情绪、IMPROVE_DIALOGUE 禁止删除停顿误会）。
+- **零引号风格兼容**：引号丢失风险检查仅原文有引号标记时才触发。
+
+原则不变：改稿是增量产物，只向 `chapter_versions` 追加快照，不覆盖原稿。详见 [REVISION_LOOP.md](docs/REVISION_LOOP.md)。
 ### 6. 存储层
 
 工作区使用 `workspace/` 作为项目容器，每个 `slot` 都可以看成一部小说的独立工作区。**slot 按大纲名命名**——导入大纲时会自动用书名派生 slug 创建同名 slot。
@@ -296,6 +328,8 @@ workspace/
 | `post` | 写后处理，跑门禁、报告、入库等 |
 | `review` | 多 Agent 审读 |
 | `batch` | 批量跑章节 `post` |
+| `rewrite` | 读 post 去重报告 → 产改写卡 + revision_tasks.json。不调 LLM。 |
+| `accept` | 原文 vs revised 做 diff + guard 复跑验证 + 语义保全评估；ingest 时经门禁（空改/回归/保全破坏拦截）后入库。 |
 | `volume` | 生成卷级汇总和桥接信息 |
 
 可以把它理解成“章节生产线”。
@@ -338,6 +372,19 @@ status -> pre -> write -> post
 
 如果章节有问题，再接：
 
+改写闭环：
+
+```text
+rewrite → [Agent 改写] → accept
+```
+
+也就是：
+1. 跑 `rewrite` 产改写卡 + 语义保全契约
+2. Agent host 据卡改写，写 `chapter_NNN_revised.txt`
+3. 跑 `accept --ingest` 做 diff/验证/保全评估，经门禁后入库
+
+如果只想看 diff 不入库，省略 `--ingest`。
+
 ```text
 review
 ```
@@ -350,8 +397,6 @@ review
 - 在跑 slot-aware 的流程之前，先 `init` 一次 workspace
 - 在 `pre` 之前先导入 outline，这套系统本质上是 outline-driven
 - `slug`、`title`、`vol-no`、`chapter-no` 在整条章节生命周期里要尽量一致
-- `review --mode light` 适合快速检查，`review --mode full` 适合完整复盘
-- 旧版 `rewrite` 动作已下线；需要修订时请用 `review` 结果驱动人工或后续 planner 流程
 
 如果你只记一条规则，请记这条：
 
@@ -391,6 +436,9 @@ review
 5. `src/pipeline/post.py`
 6. `src/agents/orchestrator.py`
 7. `src/guards/guard_registry.py`
+8. `src/pipeline/rewrite.py`
+9. `src/pipeline/semantic_contract.py`
+10. `src/pipeline/revision_diff_report.py`
 
 原因很简单：
 
@@ -398,6 +446,7 @@ review
 - 再看 `runtime.py`，知道路径/上下文怎么构建
 - 再看 `pre` / `post`，知道主流水线怎么跑
 - 再看 `agents` 和 `guards`，知道质量系统怎么挂上去
+再看 `rewrite` / `semantic_contract` / `revision_diff_report`，知道改写闭环怎么跑。
 
 ---
 
