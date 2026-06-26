@@ -500,7 +500,7 @@ ProseForge/
 - Core version: `0.8.0`
 - Python requirement: `>=3.10`
 - Optional extra: `rag`
-- Repository: `https://github.com/bijinfeng/novel-pipeline-write-engine`
+- Repository: `https://github.com/remacheybn408-boop/ProseForge`
 - License: see `LICENSE`
 
 当前这个仓库的方向，可以概括成一句话：

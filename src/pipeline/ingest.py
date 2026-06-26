@@ -322,7 +322,7 @@ def ingest(chapter_no, chapter_type="normal", app_inst=None):
     # ── 3.3 story commit: 写入弧线进度 ──
     try:
         from src.story import commit_builder as _cb
-        _project_root = Path(__file__).resolve().parent.parent
+        _project_root = app.project_root  # 运行时根（含 workspace/registry.json），保证 slot 感知
         try:
             _appeared_names = appeared_names
         except NameError:

@@ -40,11 +40,8 @@ configs/scc_menu.json
 # Generated pipeline artifacts
 exports/
 
-src/.story/commits/
-
-
-src/.story/memory/
-
+# Story commit/memory artifacts — 现根锚在项目根（修复 parent.parent 误指 src/ 后）
+.story/
 
 # Local agent reviews
 reports/

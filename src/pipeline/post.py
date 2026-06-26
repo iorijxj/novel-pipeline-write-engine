@@ -21,8 +21,9 @@ from src.pipeline.ingest import ingest, stage_review
 from src.pipeline._mental_triggers import load_mental_triggers
 from src.runtime import build_guard_context
 from src.db._conn import connect_sqlite
+from src.utils.config_utils import find_project_root
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = find_project_root(__file__)  # 仓库根（共享 configs/ 预设用），不写死层级
 app = None
 
 
@@ -45,7 +46,7 @@ def word_count_gate(content, chapter_no, chapter_type="normal", genre=None, app_
     if genre:
         try:
             import yaml
-            _preset_path = _PROJECT_ROOT.parent / "configs" / "human_texture" / "genre_presets.yaml"
+            _preset_path = _PROJECT_ROOT / "configs" / "human_texture" / "genre_presets.yaml"
             if _preset_path.exists():
                 all_presets = yaml.safe_load(_preset_path.read_text(encoding="utf-8"))
                 genre_preset = all_presets.get(genre, all_presets.get("default", {}))
@@ -282,7 +283,7 @@ def _post_run_orchestrator(content, chapter_no, orchestrator_mode, cfg, ce_repor
     return orch_report
 
 
-def _post_run_human_texture(content, chapter_no, selected_genre, args, quality_policy, ce_reports_dir):
+def _post_run_human_texture(app, content, chapter_no, selected_genre, args, quality_policy, ce_reports_dir):
     """human_texture 质量层 + 趋势对比，写 texture 报告并打印（保留内层 try）。"""
     try:
         from src.guards.human_texture import run_human_texture_guards
@@ -290,7 +291,7 @@ def _post_run_human_texture(content, chapter_no, selected_genre, args, quality_p
         pace_level = args.pace or quality_policy.get("pace_level", "normal")
         texture_report = run_human_texture_guards(
             content, chapter_no,
-            project_root=str(_PROJECT_ROOT),
+            project_root=str(app.project_root),  # 运行时根，保证 slot 感知的声纹卡解析
             genre=genre,
             pace_level=pace_level,
         )
@@ -577,7 +578,7 @@ def run_post(
         orch_report = _post_run_orchestrator(
             content, chapter_no, orchestrator_mode, cfg, ce_reports_dir,
             prev_tail_text, prev_brief, extra_context)
-        _post_run_human_texture(content, chapter_no, selected_genre, args, quality_policy, ce_reports_dir)
+        _post_run_human_texture(app, content, chapter_no, selected_genre, args, quality_policy, ce_reports_dir)
         _post_dedup_tasks(orch_report, quality_policy, ce_reports_dir, chapter_no)
     except Exception as e:
         # 安全网：human_texture/dedup 各自已有独立 try，此处仅兜底意外错误
