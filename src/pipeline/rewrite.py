@@ -197,6 +197,57 @@ def _compute_changed_ranges(source_text, revised_text) -> list:
     return changed
 
 
+def _verify_with_guard_rerun(app, revised_text, chapter_no, tasks, reports_dir) -> dict:
+    """在 revised 上重跑 guard，按类别比对『是否真修了原问题』。整段 fail-open。
+
+    - resolved: 任务类别在 revised 已不再被检出（问题消失）。
+    - persisted: 任务类别在 revised 仍在。
+    - regressed: revised 冒出的、既不在原始去重报告也不在任务集中的新类别（改写引入了新问题）。
+    真正的语义保全（伏笔/情节）需 LLM，不在此列——这里只做确定性的类别级回归比对。
+    """
+    try:
+        from src.pipeline.guard_orchestrator import run_orchestrated
+        from src.pipeline.report_deduplicator import deduplicate_warnings
+        from src.pipeline.revision_task_generator import _LABEL_TO_CAT
+
+        verify_dir = reports_dir / "_verify"
+        verify_dir.mkdir(parents=True, exist_ok=True)
+        cfg = getattr(app, "cfg", None) or {}
+        orch = run_orchestrated(
+            revised_text, chapter_no, mode="standard", config=cfg,
+            reports_dir=str(verify_dir), prev_tail="", prev_brief=None,
+            extra_context=None)
+        merged = deduplicate_warnings(orch.get("warnings", []), 0.55)
+        revised_cats = {c for c in
+                        (_LABEL_TO_CAT.get(m.get("merged_issue", "")) for m in merged) if c}
+
+        # 原始去重报告类别作为回归基线（best-effort）
+        baseline_cats = set()
+        dedup_path = reports_dir / f"chapter_{chapter_no:03d}_deduplicated_report.json"
+        if dedup_path.exists():
+            try:
+                orig = json.loads(dedup_path.read_text(encoding="utf-8"))
+                baseline_cats = {c for c in
+                                 (_LABEL_TO_CAT.get(mi.get("merged_issue", ""))
+                                  for mi in orig.get("merged_issues", [])) if c}
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        task_cats = {t.get("category") for t in tasks
+                     if t.get("category") and t.get("category") != "UNCATEGORIZED"}
+        return {
+            "available": True,
+            "mode": "standard",
+            "revised_issue_count": len(merged),
+            "revised_categories": sorted(revised_cats),
+            "resolved": sorted(task_cats - revised_cats),
+            "persisted": sorted(task_cats & revised_cats),
+            "regressed": sorted(revised_cats - (baseline_cats | task_cats)),
+        }
+    except Exception as e:
+        return {"available": False, "reason": str(e)}
+
+
 def run_accept(
     chapter_no,
     chapter_type="normal",
@@ -240,15 +291,24 @@ def run_accept(
             tasks = []
 
     changed_ranges = _compute_changed_ranges(source_text, revised_text)
+
+    # guard 复跑验证：仅当确有改动时跑一次（空改无意义且省去重活），fail-open。
+    verification = None
+    if revised_text != source_text:
+        verification = _verify_with_guard_rerun(
+            app, revised_text, chapter_no, tasks, reports_dir)
+
     rewrite_log = {
         "version": get_version(),
         "chapter_no": chapter_no,
         "source": str(chapter_file),
         "output": str(revised_path),
         "changed_ranges": changed_ranges,
+        "verification": verification or {"available": False},
     }
 
-    diff = generate_diff_report(source_text, revised_text, rewrite_log, tasks)
+    diff = generate_diff_report(source_text, revised_text, rewrite_log, tasks,
+                                verification=verification)
 
     log_path = reports_dir / f"chapter_{chapter_no:03d}_rewrite_log.json"
     diff_path = reports_dir / f"chapter_{chapter_no:03d}_revision_diff_report.json"
@@ -261,6 +321,7 @@ def run_accept(
         "recommendation": diff["recommendation"],
         "risk_flags": diff["risk_flags"],
         "summary": diff["summary"],
+        "verification": diff["verification"],
         "diff_report_path": str(diff_path),
         "rewrite_log_path": str(log_path),
         "ingested": False,

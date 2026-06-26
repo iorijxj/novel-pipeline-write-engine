@@ -6,13 +6,28 @@
 """
 import json
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
 from src.db import init_db
 from src.pipeline._base import App
 from src.pipeline.ingest import ingest
-from src.pipeline.rewrite import run_rewrite, run_accept
+from src.pipeline.rewrite import run_rewrite, run_accept, _verify_with_guard_rerun
+
+
+_COST_WARNING = {"source_guard": "scene_causality_guard", "type": "MISSING_COST",
+                 "confidence": 0.8, "message": "缺代价"}
+_DIALOGUE_WARNING = {"source_guard": "character_voice_guard", "type": "DIALOGUE",
+                     "confidence": 0.8, "message": "对白雷同"}
+
+
+def _patch_orchestrator(monkeypatch, warnings=None, raise_exc=False):
+    def fake(*a, **k):
+        if raise_exc:
+            raise RuntimeError("boom")
+        return {"warnings": warnings or [], "executed_guards": [], "warning_count": 0}
+    monkeypatch.setattr("src.pipeline.guard_orchestrator.run_orchestrated", fake)
 
 
 _CHAPTER_TEXT = (
@@ -217,6 +232,53 @@ def test_run_accept_ingest_appends_snapshot_without_overwrite(rw_env):
     assert "怀里" in rows[1][1]                  # 新快照是改稿
     # canonical 已提升为改稿
     assert "怀里" in rw_env["chapter_file"].read_text(encoding="utf-8")
+
+
+def test_verify_resolved_when_revised_clean(tmp_path, monkeypatch):
+    _patch_orchestrator(monkeypatch, warnings=[])      # revised 无问题
+    app = SimpleNamespace(cfg={})
+    tasks = [{"task_id": "rev_001", "category": "MISSING_COST"}]
+    v = _verify_with_guard_rerun(app, "改后正文", 1, tasks, tmp_path)
+    assert v["available"] is True
+    assert v["resolved"] == ["MISSING_COST"]
+    assert v["persisted"] == [] and v["regressed"] == []
+
+
+def test_verify_persisted_when_issue_remains(tmp_path, monkeypatch):
+    _patch_orchestrator(monkeypatch, warnings=[_COST_WARNING])
+    app = SimpleNamespace(cfg={})
+    tasks = [{"task_id": "rev_001", "category": "MISSING_COST"}]
+    v = _verify_with_guard_rerun(app, "改后正文", 1, tasks, tmp_path)
+    assert v["persisted"] == ["MISSING_COST"]
+    assert v["resolved"] == []
+
+
+def test_verify_regressed_when_new_category_appears(tmp_path, monkeypatch):
+    _patch_orchestrator(monkeypatch, warnings=[_DIALOGUE_WARNING])
+    app = SimpleNamespace(cfg={})
+    tasks = [{"task_id": "rev_001", "category": "MISSING_COST"}]
+    v = _verify_with_guard_rerun(app, "改后正文", 1, tasks, tmp_path)
+    assert "DIALOGUE_SAMENESS" in v["regressed"]
+
+
+def test_verify_fail_open_on_exception(tmp_path, monkeypatch):
+    _patch_orchestrator(monkeypatch, raise_exc=True)
+    app = SimpleNamespace(cfg={})
+    v = _verify_with_guard_rerun(app, "改后正文", 1, [], tmp_path)
+    assert v["available"] is False
+    assert "reason" in v
+
+
+def test_run_accept_attaches_verification(rw_env, monkeypatch):
+    _patch_orchestrator(monkeypatch, warnings=[])
+    app = rw_env["app"]
+    run_rewrite(1, novel_slug=app.novel_slug, novel_title="Demo", volume_no=1, context=app)
+    revised = _CHAPTER_TEXT.replace("傍晚，他推开屋门", "黄昏时分，他缓缓推开屋门")
+    (rw_env["chapter_file"].parent / "chapter_001_revised.txt").write_text(revised, encoding="utf-8")
+
+    result = run_accept(1, novel_slug=app.novel_slug, novel_title="Demo",
+                        volume_no=1, ingest=False, context=app)
+    assert result["verification"]["available"] is True
 
 
 if __name__ == "__main__":
