@@ -25,6 +25,8 @@ hermes-plugin/hermes-forgen-engine/__pycache__/
 
 # Config with secrets
 config/license_server.json
+# Local runtime config (copied from config.example.json)
+config.json
 
 # Local privacy — NOT to be pushed to GitHub
 CLAUDE.md
