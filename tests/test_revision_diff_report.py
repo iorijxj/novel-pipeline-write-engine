@@ -29,12 +29,12 @@ def test_generate_diff_report():
     assert report["recommendation"] in ("REVIEW_BEFORE_ACCEPT", "REVIEW_CAREFULLY", "REVISION_REJECTED")
 
 
-def test_recommendation_low_change():
+def test_recommendation_no_change_detected():
     source = "一段。\n\n二段。\n\n三段。\n\n四段。\n\n五段。\n\n六段。"
-    revised = source  # no change
+    revised = source  # 完全无改动 → 空改拦截
     log = {"source": "s", "output": "o", "changed_ranges": []}
     report = generate_diff_report(source, revised, log)
-    assert report["recommendation"] == "REVIEW_BEFORE_ACCEPT"
+    assert report["recommendation"] == "NO_CHANGE_DETECTED"
 
 
 def test_risk_flags_detect_quote_loss():
