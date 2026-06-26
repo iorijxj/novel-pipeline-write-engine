@@ -24,8 +24,10 @@ deliberately reuse the same scripts so all surfaces stay in sync):
 python plugin/proseforge-codex/scripts/nf_pipeline.py --action <action> ...
 ```
 
-Always invoke from the repo root (`D:\ProseForge`) so the wrapper can resolve
-`src/` imports correctly.
+Always invoke from the **repo root** so the wrapper resolves `src/` imports
+correctly. Running from elsewhere? Pass `--project-root <repo-root>` or set
+`PROSEFORGE_PROJECT_ROOT=<repo-root>`; otherwise the wrapper auto-discovers the
+root by walking up from the current directory.
 
 ## Action mapping
 
@@ -34,8 +36,16 @@ Always invoke from the repo root (`D:\ProseForge`) so the wrapper can resolve
 - `review`: run the 6-agent review flow (`light` or `full` mode).
 - `batch`: run `post` for a chapter range `from-ch..to-ch`.
 - `volume`: build the volume-level summary + bridge report.
-- `rewrite`: 读 post 产出的去重报告，生成「改写卡」(must_keep/avoid + 待改段落原文) 到 `outputs/rewrite_cards/`，由 Agent 据卡改写并写 `chapter_NNN_revised.txt`。内核不调 LLM。
-- `accept`: 原稿 vs `chapter_NNN_revised.txt` 出 diff + 风险标记 + recommendation；加 `--ingest` 时审核通过则入库（追加版本快照，不覆盖原稿）。
+- `rewrite`: 读 post 产出的去重报告，生成**章节尺度**「改写卡」到 `outputs/rewrite_cards/`（按问题类别给 must_keep/avoid + 问题/指令 + 可选 evidence 例句，不再逐段引原文）+ `revision_tasks.json`，由 Agent 据卡改写并写 `chapter_NNN_revised.txt`。同时附产**语义保全清单**：`exports/reports/chapter_NNN_semantic_review_request.json` + host 卡 `outputs/rewrite_cards/chapter_NNN_semantic_review.md`。内核不调 LLM。
+- `accept`: 原稿 vs `chapter_NNN_revised.txt` 出字级 diff + 风险标记 + recommendation；加 `--ingest` 时审核通过则入库（追加版本快照，不覆盖原稿）。返回可能含 `verification` 与 `preservation` 块（见下方 Current behavior notes）。
+
+## Current behavior notes
+
+- These wrappers call the live repo code under `src/`, not a copied pipeline implementation.
+- `accept` may return both `verification` and `preservation`.
+- `verification` is only deterministic guard-category regression output (`resolved` / `persisted` / `regressed`) from re-running the guards on the revised draft; it does **not** imply semantic fidelity.
+- `preservation` is the separate semantic-preservation block (开放读者承诺 / 活跃伏笔 / 角色关系 / canon 硬事实 / 结尾钩). 内核只产契约 + 零-LLM 词级预检，真正的语义判断由 host 据 `chapter_NNN_semantic_review.md` 卡写回执 `chapter_NNN_semantic_review.json`（schema: `{"chapter_no": N, "items": [{"id", "verdict": "preserved|broken|uncertain", "note"}]}`），`accept` 读它评估。
+- 保全门禁默认 **advisory**：判定 broken 仅勝告（封顶 `REVIEW_CAREFULLY` + 加 risk_flag），不阻断入库。要硬阻断，在 config 设 `semantic_preservation.enforce: true`（此时 broken → `REVISION_REJECTED` 且不入库）。
 
 ## Required arguments
 

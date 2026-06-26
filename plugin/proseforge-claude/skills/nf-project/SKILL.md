@@ -22,7 +22,10 @@ script** that ships with the Codex plugin:
 python plugin/proseforge-codex/scripts/nf_project.py --action <action> ...
 ```
 
-Always invoke from the repo root (`D:\ProseForge`).
+Always invoke from the **repo root**. Running from elsewhere? Pass
+`--project-root <repo-root>` or set `PROSEFORGE_PROJECT_ROOT=<repo-root>`;
+otherwise the wrapper auto-discovers the root by walking up from the current
+directory.
 
 ## Action mapping
 
