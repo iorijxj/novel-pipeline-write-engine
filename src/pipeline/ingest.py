@@ -24,6 +24,21 @@ from src.pipeline._base import (
 # STEP 8: INGEST — 自动化入库
 # ============================================================
 
+def _resolve_chapter_title(filename, content):
+    """解析章节标题：优先正文 `# 第N章 标题`，否则文件名（分隔符可选），再否则 stem。
+
+    文件名可能按 `第N章_标题.txt` 或 `第N章标题.txt`（无下划线）落盘
+    （`_find_chapter_file` 按 `第N章*.txt` glob），故分隔符 `[_\\s]*` 可选。
+    """
+    fname = Path(filename).name
+    m = re.match(r'第\d+章[_\s]*(.+)\.txt$', fname)
+    file_title = m.group(1).strip() if m else Path(fname).stem
+    content_m = re.search(
+        r'^#\s*第[一二三四五六七八九十百千\d]+章\s+(.+?)$',
+        content.strip(), re.MULTILINE)
+    return content_m.group(1).strip() if content_m else file_title
+
+
 def ingest(chapter_no, chapter_type="normal", app_inst=None):
     if app_inst is None:
         raise RuntimeError("ingest requires app_inst/context")
@@ -57,19 +72,11 @@ def ingest(chapter_no, chapter_type="normal", app_inst=None):
         filepath = find_chapter_file_with_fallback(chapter_no, app)
         if not filepath:
             print(f"[FAIL] 找不到第{chapter_no}章TXT"); conn.close(); return None
-        # v0.4.5: Extract title from content's first heading line, prefer over filename
-        title_match = re.match(r'第\d+章_(.+)\.txt', filepath.name)
-        file_title = title_match.group(1) if title_match else filepath.stem
-
         with open(filepath, 'r', encoding='utf-8') as f: raw = f.read()
         content = _strip_selfcheck(raw)
 
-        # Try to extract actual title from content (supports punctuation)
-        content_title_match = re.search(r'^#\s*第[一二三四五六七八九十百千\d]+章\s+(.+?)$', content.strip(), re.MULTILINE)
-        if content_title_match:
-            title = content_title_match.group(1).strip()
-        else:
-            title = file_title
+        # v0.4.5: 标题优先正文 `# 第N章 标题`，否则文件名（分隔符可选），再否则 stem
+        title = _resolve_chapter_title(filepath.name, content)
         wc = _count_chinese(content)
 
         # ── Resolve volume_id ──
