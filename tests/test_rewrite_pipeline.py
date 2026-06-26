@@ -6,6 +6,7 @@
 """
 import json
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -119,6 +120,16 @@ def test_run_rewrite_produces_card_and_tasks(rw_env):
     assert tasks_path.exists()
     bundle = json.loads(tasks_path.read_text(encoding="utf-8"))
     assert bundle["task_count"] == result["task_count"]
+
+
+def test_run_rewrite_emits_semantic_request(rw_env):
+    app = rw_env["app"]
+    result = run_rewrite(1, novel_slug=app.novel_slug, novel_title="Demo", volume_no=1, context=app)
+    assert result["semantic_request_path"]
+    req = json.loads(Path(result["semantic_request_path"]).read_text(encoding="utf-8"))
+    assert "contract" in req and "verdict_template" in req
+    card = Path(result["semantic_card_path"])
+    assert card.exists() and "语义保全清单" in card.read_text(encoding="utf-8")
 
 
 def test_run_rewrite_requires_dedup_report(rw_env):

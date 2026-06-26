@@ -125,10 +125,11 @@ def generate_risk_flags(source_paras: list, revised_paras: list,
     return flags
 
 
-def _recommend(summary: dict, risk_flags: list, verification: dict) -> str:
-    """多信号推荐：字级改动量 + risk_flags + guard 复跑验证（见 rewrite.py）。
+def _recommend(summary: dict, risk_flags: list, verification: dict,
+               preservation: dict = None) -> str:
+    """多信号推荐：字级改动量 + risk_flags + guard 复跑验证 + 语义保全（见 rewrite.py）。
 
-    无验证块（verification 为空/不可用）时退回纯结构信号，向后兼容。"""
+    无验证/保全块（为空/不可用）时退回纯结构信号，向后兼容。"""
     ratio = summary["char_change_ratio"]
     v = verification or {}
     available = bool(v.get("available"))
@@ -136,24 +137,39 @@ def _recommend(summary: dict, risk_flags: list, verification: dict) -> str:
     resolved = available and bool(v.get("resolved"))
     loss_or_big = any("丢失" in f or "超过" in f for f in risk_flags)
 
+    p = preservation or {}
+    preservation_broken = bool(p.get("available") and p.get("broken"))
+
     if ratio <= 0.001:
         return "NO_CHANGE_DETECTED"
+    # 语义保全被破坏：enforce → 直接拒绝；否则仅 advisory（下方封顶 CAREFULLY）。
+    if preservation_broken and p.get("enforced"):
+        return "REVISION_REJECTED"
     if regressed:
-        return "REVISION_REJECTED"        # 复跑发现问题回升 → 拒绝
-    if ratio > 0.50 and not resolved:
-        return "REVISION_REJECTED"        # 改动过猛且未验证改善 → 拒绝
-    if resolved and not loss_or_big:
-        return "REVIEW_BEFORE_ACCEPT"     # 验证有改善、无重大风险
-    if ratio <= 0.35 and not loss_or_big:
-        return "REVIEW_BEFORE_ACCEPT"
-    return "REVIEW_CAREFULLY"
+        base = "REVISION_REJECTED"        # 复跑发现问题回升 → 拒绝
+    elif ratio > 0.50 and not resolved:
+        base = "REVISION_REJECTED"        # 改动过猛且未验证改善 → 拒绝
+    elif resolved and not loss_or_big:
+        base = "REVIEW_BEFORE_ACCEPT"     # 验证有改善、无重大风险
+    elif ratio <= 0.35 and not loss_or_big:
+        base = "REVIEW_BEFORE_ACCEPT"
+    else:
+        base = "REVIEW_CAREFULLY"
+
+    # advisory：保全疑似破坏时不给"可直接接受"，封顶到需仔细复核。
+    if preservation_broken and base == "REVIEW_BEFORE_ACCEPT":
+        base = "REVIEW_CAREFULLY"
+    return base
 
 
 def generate_diff_report(source_text: str, revised_text: str,
                          rewrite_log: dict,
                          tasks: list = None,
-                         verification: dict = None) -> dict:
-    """生成完整 diff report。verification 为 guard 复跑验证块（可选，见 rewrite.py）。"""
+                         verification: dict = None,
+                         preservation: dict = None) -> dict:
+    """生成完整 diff report。
+
+    verification = guard 复跑验证块；preservation = 语义保全评估块（均可选，见 rewrite.py）。"""
     source_paras = split_paragraphs(source_text)
     revised_paras = split_paragraphs(revised_text)
 
@@ -161,7 +177,12 @@ def generate_diff_report(source_text: str, revised_text: str,
     changed_ranges = rewrite_log.get("changed_ranges", [])
     task_results = compute_task_results(tasks or [], changed_ranges, verification)
     risk_flags = generate_risk_flags(source_paras, revised_paras, summary)
-    recommendation = _recommend(summary, risk_flags, verification)
+
+    p = preservation or {}
+    if p.get("available") and p.get("broken"):
+        risk_flags.append(f"语义保全：{len(p['broken'])} 项可能被破坏，建议人工复核")
+
+    recommendation = _recommend(summary, risk_flags, verification, preservation)
 
     chapter_no = rewrite_log.get("chapter_no", 0)
 
@@ -174,6 +195,7 @@ def generate_diff_report(source_text: str, revised_text: str,
         "task_results": task_results,
         "risk_flags": risk_flags,
         "verification": verification or {"available": False},
+        "preservation": preservation or {"available": False},
         "recommendation": recommendation,
     }
 

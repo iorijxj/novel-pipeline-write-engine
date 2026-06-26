@@ -26,6 +26,24 @@ from src.pipeline._base import (
 from src.pipeline.revision_task_generator import generate_tasks, split_paragraphs
 from src.pipeline.revision_diff_report import generate_diff_report
 from src.pipeline.ingest import ingest as ingest_chapter
+from src.pipeline.semantic_contract import (
+    build_preservation_contract,
+    lexical_precheck,
+    read_verdict,
+    evaluate_preservation,
+    write_review_request,
+)
+
+
+def _semantic_paths(app, chapter_file, chapter_no):
+    """语义保全三件套路径：请求 json / host 卡 md / host 回执 json。"""
+    reports_dir = app.exports_root / "reports"
+    card_dir = app.outputs_root / "rewrite_cards"
+    return (
+        reports_dir / f"chapter_{chapter_no:03d}_semantic_review_request.json",
+        card_dir / f"chapter_{chapter_no:03d}_semantic_review.md",
+        chapter_file.parent / f"chapter_{chapter_no:03d}_semantic_review.json",
+    )
 
 
 def _build_context(novel_slug, novel_title, volume_no, chapters_dir,
@@ -166,6 +184,17 @@ def run_rewrite(
     card_path = card_dir / f"chapter_{chapter_no:03d}_rewrite_card.md"
     card_path.write_text(card_md, encoding="utf-8")
 
+    # 语义保全：产契约 + host 请求卡（让 host 改写时就知道"什么必须留住"），fail-open。
+    req_json, req_md, verdict_path = _semantic_paths(app, chapter_file, chapter_no)
+    semantic_request_path = ""
+    try:
+        contract = build_preservation_contract(app, chapter_no, chapter_text)
+        write_review_request(contract, None, req_json, req_md, verdict_path)
+        semantic_request_path = str(req_json)
+    except Exception as _e:
+        from src.utils.error_handling import log_optional_failure
+        log_optional_failure("rewrite: 语义保全请求卡", _e)
+
     return {
         "status": "ok",
         "chapter_no": chapter_no,
@@ -173,6 +202,8 @@ def run_rewrite(
         "card_path": str(card_path),
         "tasks_path": str(tasks_path),
         "revised_expected_path": str(revised_path),
+        "semantic_request_path": semantic_request_path,
+        "semantic_card_path": str(req_md),
         "message": bundle["message"],
     }
 
@@ -259,9 +290,13 @@ def run_accept(
     project_root=None,
     config_path=None,
     ingest=False,
+    enforce_preservation=None,
     context=None,
 ):
-    """原文 vs revised 做 diff；ingest=True 且未被拒绝时入库。不调 LLM。"""
+    """原文 vs revised 做 diff；ingest=True 且未被拒绝时入库。不调 LLM。
+
+    enforce_preservation: 语义保全 broken 时是否硬阻入库（None → 读 cfg
+    `semantic_preservation.enforce`，默认 False = 仅勝告）。"""
     if context is None:
         context = _build_context(novel_slug, novel_title, volume_no,
                                  chapters_dir, db_path, project_root, config_path)
@@ -298,6 +333,24 @@ def run_accept(
         verification = _verify_with_guard_rerun(
             app, revised_text, chapter_no, tasks, reports_dir)
 
+    # 语义保全：重建契约 → 词级预检 + 读 host 回执 → 评估（fail-open）。
+    if enforce_preservation is None:
+        enforce_preservation = bool(
+            (getattr(app, "cfg", None) or {}).get("semantic_preservation", {}).get("enforce", False))
+    preservation = None
+    if revised_text != source_text:
+        try:
+            _, _, verdict_path = _semantic_paths(app, chapter_file, chapter_no)
+            contract = build_preservation_contract(app, chapter_no, source_text)
+            precheck = lexical_precheck(contract, revised_text)
+            verdict = read_verdict(verdict_path)
+            preservation = evaluate_preservation(
+                contract, precheck, verdict, enforce=enforce_preservation)
+        except Exception as _e:
+            from src.utils.error_handling import log_optional_failure
+            log_optional_failure("accept: 语义保全评估", _e)
+            preservation = {"available": False}
+
     rewrite_log = {
         "version": get_version(),
         "chapter_no": chapter_no,
@@ -305,10 +358,11 @@ def run_accept(
         "output": str(revised_path),
         "changed_ranges": changed_ranges,
         "verification": verification or {"available": False},
+        "preservation": preservation or {"available": False},
     }
 
     diff = generate_diff_report(source_text, revised_text, rewrite_log, tasks,
-                                verification=verification)
+                                verification=verification, preservation=preservation)
 
     log_path = reports_dir / f"chapter_{chapter_no:03d}_rewrite_log.json"
     diff_path = reports_dir / f"chapter_{chapter_no:03d}_revision_diff_report.json"
@@ -322,6 +376,7 @@ def run_accept(
         "risk_flags": diff["risk_flags"],
         "summary": diff["summary"],
         "verification": diff["verification"],
+        "preservation": diff["preservation"],
         "diff_report_path": str(diff_path),
         "rewrite_log_path": str(log_path),
         "ingested": False,
