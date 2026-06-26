@@ -17,6 +17,7 @@ from src.pipeline._base import (
     load_config, story_health, load_characters,
     write_json_atomic,
 )
+from src.utils.config_utils import find_project_root
 from src.utils.error_handling import log_optional_failure
 from src.pipeline.chapter_context import _build_context_injection
 from src.pipeline.volume import (
@@ -809,7 +810,7 @@ def run_pre(
         # ── FTS5 健康检查 ──
         _pre_fts_health(app, log_entries)
 
-        PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+        PROJECT_ROOT = find_project_root(__file__)
         # ── 优先读取题材 genre ──
         genre = _pre_load_genre(cur, nid, log_entries)
 

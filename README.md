@@ -78,7 +78,7 @@ ProseForge 提供三个插件表面，选一个即可：
 
 ```bash
 # 把插件源码 plugin/proseforge-Hermes/ 链接到 Hermes 的 profiles/<profile>/plugins/ 下
-# 在 Hermes 配置中启用该插件（注册的 toolset 名为 hermes-forgen-engine）
+# 在 Hermes 配置中启用该插件（注册的 toolset 名为 proseforge-engine）
 # 注册后可用工具: nf_pipeline, nf_project
 ```
 

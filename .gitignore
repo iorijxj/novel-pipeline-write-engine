@@ -20,9 +20,6 @@ env/
 Thumbs.db
 .DS_Store
 
-# Project
-hermes-plugin/hermes-forgen-engine/__pycache__/
-
 # Config with secrets
 config/license_server.json
 # Local runtime config (copied from config.example.json)

@@ -16,11 +16,11 @@ from contextlib import closing
 from pathlib import Path
 
 from version import get_version
-from src.utils.config_utils import DEFAULT_DB_PATH, load_json_config, resolve_path
+from src.utils.config_utils import DEFAULT_DB_PATH, find_project_root, load_json_config, resolve_path
 from src.db._conn import connect_sqlite
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = find_project_root(__file__)
 DEFAULT_SLUG = "demo_novel"
 DEFAULT_CONFIG = PROJECT_ROOT / "config.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "task_cards"

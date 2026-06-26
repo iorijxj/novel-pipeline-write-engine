@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""install_plugin.py — 一键安装 hermes-forgen-engine 到 Hermes writer profile
+"""install_plugin.py — 一键安装 proseforge-engine 到 Hermes writer profile
 
 用法:
     python install_plugin.py
@@ -27,9 +27,9 @@ def find_hermes_root() -> Path:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="安装 hermes-forgen-engine 插件到 Hermes profile")
+    parser = argparse.ArgumentParser(description="安装 proseforge-engine 插件到 Hermes profile")
     parser.add_argument("--profile", default="writer", help="目标 profile 名称 (默认: writer)")
-    parser.add_argument("--plugin-src", default=None, help="插件源码目录 (默认: 项目内 hermes-plugin/hermes-forgen-engine)")
+    parser.add_argument("--plugin-src", default=None, help="插件源码目录 (默认: 项目内 plugin/proseforge-Hermes)")
     args = parser.parse_args()
 
     # 项目根目录假定为脚本所在目录
