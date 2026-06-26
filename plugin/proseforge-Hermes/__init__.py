@@ -202,6 +202,8 @@ def _handle_pipeline(args: dict, **kw) -> dict:
                 volume_no=int(args["vol_no"]),
                 chapter_no=int(args["chapter_no"]),
                 chapter_type=args.get("chapter_type", "normal"),
+                min_confidence=float(args.get("min_confidence", 0.70)),
+                max_tasks=int(args.get("max_tasks", 5)),
             )
             return result if result else {"status": "ok", "message": "rewrite completed"}
 
@@ -213,6 +215,7 @@ def _handle_pipeline(args: dict, **kw) -> dict:
                 chapter_no=int(args["chapter_no"]),
                 chapter_type=args.get("chapter_type", "normal"),
                 ingest=bool(args.get("ingest", False)),
+                enforce_preservation=args.get("enforce_preservation"),
             )
             return result if result else {"status": "ok", "message": "accept completed"}
 
@@ -376,7 +379,19 @@ NF_PIPELINE_SCHEMA = {
             },
             "ingest": {
                 "type": "boolean",
-                "description": "accept: 通过审核后入库（追加版本快照，不覆盖原稿），默认 false。",
+                "description": "accept: 经门禁(diff+guard复跑+语义保全)后入库，默认 false。",
+            },
+            "enforce_preservation": {
+                "type": "boolean",
+                "description": "accept: 语义保全broken时硬阻入库（默认 false = 仅告警）。",
+            },
+            "min_confidence": {
+                "type": "number",
+                "description": "rewrite: 最低置信度阈值，默认 0.70。",
+            },
+            "max_tasks": {
+                "type": "integer",
+                "description": "rewrite: 最大改写任务数，默认 5。",
             },
             "chapter_type": {
                 "type": "string",
