@@ -26,6 +26,81 @@ def find_hermes_root() -> Path:
     return Path.home() / ".hermes"
 
 
+def enable_plugin_in_config(config_file: Path, plugin_name: str) -> bool:
+    """幂等地把 plugin_name 加入 config.yaml 的 plugins.enabled 列表。
+
+    仅做基于行的最小改动（不走 YAML round-trip），因此保留原有注释/格式，
+    且不依赖 PyYAML（安装器可能在裸 system python 下运行）。
+    返回 True 表示写入了改动，False 表示无需改动。
+    """
+    text = config_file.read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    # 已在 enabled 列表中（作为列表项出现）→ 无需改动
+    item_marker = f"- {plugin_name}"
+    if any(ln.strip() == item_marker for ln in lines):
+        return False
+
+    # 定位顶层 plugins: 行
+    plugins_idx = next(
+        (i for i, ln in enumerate(lines) if ln.rstrip() == "plugins:" or ln.startswith("plugins:")),
+        None,
+    )
+
+    if plugins_idx is None:
+        # 无 plugins 段 → 追加完整段落
+        block = ["plugins:", "  enabled:", f"    - {plugin_name}"]
+        if lines and lines[-1].strip():
+            lines.append("")  # 与已有内容留一空行
+        lines.extend(block)
+        config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return True
+
+    plugins_indent = len(lines[plugins_idx]) - len(lines[plugins_idx].lstrip())
+
+    # 在 plugins 段内查找 enabled: 子键（缩进比 plugins: 更深）
+    enabled_idx = None
+    for i in range(plugins_idx + 1, len(lines)):
+        ln = lines[i]
+        if not ln.strip():
+            continue
+        indent = len(ln) - len(ln.lstrip())
+        if indent <= plugins_indent:
+            break  # 离开 plugins 段
+        if ln.strip().rstrip() in ("enabled:", "enabled: []") or ln.lstrip().startswith("enabled:"):
+            enabled_idx = i
+            break
+
+    if enabled_idx is None:
+        # 有 plugins: 但无 enabled: → 紧随 plugins: 之后插入 enabled 子段
+        child_indent = " " * (plugins_indent + 2)
+        new_lines = [f"{child_indent}enabled:", f"{child_indent}  - {plugin_name}"]
+        lines[plugins_idx + 1 : plugins_idx + 1] = new_lines
+        config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return True
+
+    # 已有 enabled: 列表 → 追加一个列表项，匹配已有列表项缩进
+    enabled_indent = len(lines[enabled_idx]) - len(lines[enabled_idx].lstrip())
+    item_indent = None
+    insert_at = enabled_idx + 1
+    for i in range(enabled_idx + 1, len(lines)):
+        ln = lines[i]
+        if not ln.strip():
+            insert_at = i
+            continue
+        indent = len(ln) - len(ln.lstrip())
+        if indent <= enabled_indent:
+            break  # 离开 enabled 子段
+        if ln.lstrip().startswith("- "):
+            item_indent = indent
+            insert_at = i + 1
+    if item_indent is None:
+        item_indent = enabled_indent + 2  # 空列表，使用默认缩进
+    lines.insert(insert_at, f"{' ' * item_indent}- {plugin_name}")
+    config_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description="安装 proseforge-engine 插件到 Hermes profile")
     parser.add_argument("--profile", default="writer", help="目标 profile 名称 (默认: writer)")
@@ -62,14 +137,13 @@ def main():
     print(f"[OK] 插件已安装到: {target_dir}")
     print(f"[OK] 已写入 .project_root: {project_root.resolve()}")
 
-    # 确保 profile 配置加载该插件
+    # 确保 profile 配置加载该插件（插件名由目标目录名派生，避免硬编码）
     config_file = profile_dir / "config.yaml"
     if config_file.exists():
-        ct = config_file.read_text(encoding="utf-8")
-        if "proseforge-engine" not in ct:
-            ct = ct.replace("plugins:", f"plugins:\n  enabled:\n    - proseforge-engine")
-            config_file.write_text(ct, encoding="utf-8")
-            print(f"[OK] 已在 config.yaml 中启用插件")
+        if enable_plugin_in_config(config_file, target_dir.name):
+            print(f"[OK] 已在 config.yaml 中启用插件: {target_dir.name}")
+        else:
+            print(f"[OK] config.yaml 已启用插件: {target_dir.name}")
 
     print(f"\n启动: hermes --profile {args.profile}")
     print(f"工具: nf_状态  nf_预写  nf_续写  nf_改写  nf_流水  nf_卷管")
