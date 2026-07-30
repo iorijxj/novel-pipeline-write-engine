@@ -1,4 +1,0 @@
-repository=remacheybn408-boop/ProseForge
-branch=master
-revision=f6183d17f9a3d46eb42c6ed3c8a6ae2e135dc6a5
-worktree_branch=feat/web-v1.1-ink-usage
